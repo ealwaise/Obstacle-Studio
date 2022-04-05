@@ -1,0 +1,12 @@
+explosion_player=Current Player
+wall_player=Current Player
+ob_DC=Overmind Cocoon
+count_DC=Cantina
+frame_DC=Data Disc
+DC_units_player=Player 8
+trigger_player=Player 8
+player_force=Bounders
+comment_ob=True
+comment_count=True
+comment_part=True
+death_type=kill
