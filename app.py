@@ -76,14 +76,21 @@ def open_file(main_window, canvas, terrain_dict, tile_dict, loc_dict, num_locs, 
             explosions = loc_data['explosions']
             for c in explosions.keys():
                 count = int(c)
-                ob.locs[count] = ob.locs.get(count, []) + [loc]
+                flag = False
+                try:
+                    if loc in ob.locs[count]:
+                        flag = True
+                except:
+                    pass
+                if not flag:
+                    ob.locs[count] = ob.locs.get(count, []) + [loc]
                 
-                explosion_dict = explosions[c][0]
-                name = explosion_dict['name']
-                player = explosion_dict['player']
-                sprite = bool(explosion_dict['sprite'])
-                explosion = Explosion(name, player, sprite)
-                loc.place_explosion(explosion, count)
+                for item in explosions[c]:
+                    name = item['name']
+                    player = item['player']
+                    sprite = bool(item['sprite'])
+                    explosion = Explosion(name, player, sprite)
+                    loc.place_explosion(explosion, count)
                 
             walls = loc_data['walls']
             for c in walls.keys():
@@ -128,11 +135,14 @@ def save(main_window, canvas, terrain_dict, loc_dic, num_locs, ob, ob_num, curre
         dictionary['num locs'] = num_locs.num
         
         dictionary['obstacle'] = json.dumps(ob, default=default)
+        
+        dictionary['ob_num'] = ob_num.get()
+        
         file.write(json.dumps(dictionary))
         file.close()
 
 def save_as(main_window, canvas, terrain_dict, loc_dic, num_locs, ob, ob_num, current_file, event):
-    file = filedialog.asksaveasfile(mode='w', initialdir = './', title = 'File name:', filetypes = [('JavaScript Object Notation file', '*.json')])
+    file = filedialog.asksaveasfile(mode='w', initialdir = './', title = 'File name:', filetypes = [('JavaScript Object Notation file', '*.json')], defaultextension='*.json')
     if file is not None:
         current_file.set(file.name)
         dictionary = {}
@@ -949,10 +959,6 @@ class Location:
         self.borders.append(display.create_line((self.x + 32*self.width, self.y), (self.x + 32*self.width, self.y + 32*self.height), tag='locationExtras', fill='#20ff26'))
         self.borders.append(display.create_line((self.x, self.y + 32*self.height), (self.x + 32*self.width, self.y + 32*self.height), tag='locationExtras', fill='#20ff26'))
         self.borders.append(display.create_line((self.x, self.y), (self.x, self.y + 32*self.height), tag='locationExtras', fill='#20ff26'))
-        self.top = self.borders[0]
-        self.right = self.borders[1]
-        self.bottom = self.borders[2]
-        self.left = self.borders[3]
         
     def write_name(self, num_locs):
         try:
@@ -1144,7 +1150,8 @@ class Location:
     def to_json(self):
         explosions = {}
         for count in self.explosions.keys():
-            explosions[count] = self.explosions[count][0]
+            for explosion in self.explosions[count]:
+                explosions[count] = explosions.get(count, []) + [explosion[0]]
         walls = {}
         for count in self.walls.keys():
             walls[count] = (self.walls[count][0].name, self.walls[count][0].player, self.walls[count][2])
@@ -1163,30 +1170,14 @@ def move_location(d, w, h, loc_dictionary, event):
         loc.move(d.num)
             
 def show_locations(dictionary):
-    for loc in dictionary.values():
-        for item in (loc.top, loc.right, loc.bottom, loc.left, loc.name, loc.overlay, loc.mouseover_overlay):
-            display.itemconfigure(item, state='normal') 
-        try:
-            display.itemconfigure(loc.overlay, state='normal')
-        except:
-            pass
-        try:
-            display.itemconfigure(loc.mouseover_overlay, state='normal')
-        except:
-            pass
+    display.itemconfig('location', state='normal')
+    display.itemconfig('locationMouseover', state='normal')
+    display.itemconfig('locationExtras', state='normal')
             
 def hide_locations(dictionary):
-    for loc in dictionary.values():
-        for item in (loc.top, loc.right, loc.bottom, loc.left, loc.name, loc.overlay, loc.mouseover_overlay):
-            display.itemconfigure(item, state='hidden')
-        try:
-            display.itemconfigure(loc.overlay, state='hidden')
-        except:
-            pass
-        try:
-            display.itemconfigure(loc.mouseover_overlay, state='hidden')
-        except:
-            pass
+    display.itemconfig('location', state='hidden')
+    display.itemconfig('locationMouseover', state='hidden')
+    display.itemconfig('locationExtras', state='hidden')
 
 
 #highlights (in green) the top location underneath the mouse cursor           
