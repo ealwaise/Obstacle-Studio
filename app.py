@@ -986,18 +986,19 @@ class Location:
         y = display.winfo_pointery() - display.winfo_rooty()
         bounds_x = 0
         bounds_y = 0
-        sensitivity = min(8, self.width*4) 
+        x_sensitivity = min(8, self.width*4)
+        y_sensitivity = min(8, self.height*4)
         if self.x < x < self.x + 32*self.width:
-            if self.x < x <= self.x + sensitivity:
+            if self.x < x <= self.x + x_sensitivity:
                 bounds_x = 2
-            elif self.x + 32*self.width - sensitivity <= x < self.x + 32*self.width:
+            elif self.x + 32*self.width - x_sensitivity <= x < self.x + 32*self.width:
                 bounds_x = 3
             else:
                 bounds_x = 1
         if self.y < y < self.y + 32*self.height:
-            if self.y < y <= self.y + sensitivity:
+            if self.y < y <= self.y + y_sensitivity:
                 bounds_y = 2
-            elif self.y + 32*self.height - sensitivity <= y < self.y + 32*self.height:
+            elif self.y + 32*self.height - y_sensitivity <= y < self.y + 32*self.height:
                 bounds_y = 3
             else:
                 bounds_y = 1
@@ -1068,18 +1069,18 @@ class Location:
                 self.center = (self.x + 16*self.width, self.y + 16*self.height)
                 if self.mouseover()[0] > 1:
                     self.resizing[0] = True
-                if self.mouseover()[1] > 2:
+                if self.mouseover()[1] > 1:
                     self.resizing[1] = True
 
             if self.resizing[0]:
                 if x < self.center[0]:
                     self.width += int((self.x - x)/32)
-                    print(self.width)
                     self.x = x
                 else:
                     self.width = int(max(1, abs(self.x - x)/32))
                     
             if self.resizing[1]:
+                print(2)
                 if y < self.center[1]:
                     self.height += int((self.y - y)/32)
                     self.y = y
