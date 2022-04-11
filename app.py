@@ -1,12 +1,14 @@
 import units
 import obgen
 import math
+import json
+import platform
 import tkinter as tk
-import ttkwidgets
-from ttkwidgets.autocomplete import AutocompleteCombobox as acc
 from tkinter.scrolledtext import ScrolledText
 from tkinter import *
-from tkinter import ttk, StringVar
+from tkinter import ttk, filedialog, StringVar
+import ttkwidgets
+from ttkwidgets.autocomplete import AutocompleteCombobox as acc
 from PIL import Image, ImageTk
 
 #the main window
@@ -14,6 +16,157 @@ root = tk.Tk()
 root.title('Obstacle Studio')
 root.columnconfigure(0, weight=1)
 root.rowconfigure(0, weight=1)
+
+menubar = Menu(root)
+root.config(menu=menubar)
+
+def default(obj):
+    if hasattr(obj, 'to_json'):
+        return obj.to_json()
+    raise TypeError(f'Object of type {obj.__class__.__name__} is not JSON serializable')
+    
+def new_file(main_window, canvas, terrain_dict, loc_dict, num_locs, ob, current_file, event):
+    canvas.clear()
+    ob.count = 1
+    ob.num_counts = 1
+    ob.locs = {1:[]}
+    ob.timing = {1:1}
+    ob.show_count(1)
+    ob.walls.clear()
+    terrain_dict.clear()
+    loc_dict.clear()
+    num_locs.replace(0)
+    current_file.set('')
+    
+def open_file(main_window, canvas, terrain_dict, tile_dict, loc_dict, num_locs, ob, ob_num, tool, event):
+    file = filedialog.askopenfile(mode='r', initialdir = './', title = 'File name:', filetypes = [('JavaScript Object Notation file', '*.json')], defaultextension='.json')
+    if file is not None:
+        str_dict = file.read()
+        JSON_dict = json.loads(str_dict)
+        canvas.clear()
+        
+        ob_num.set(JSON_dict['ob_num'])
+        ob.locs.clear()
+        ob.timing.clear()
+        ob.count = 1
+        
+        terrain_dict.clear()
+        JSON_terrain_dict = json.loads(JSON_dict['terrain'])
+        for coords in JSON_terrain_dict.keys():
+            x = int(coords.split()[0])
+            y = int(coords.split()[1])
+            index = int(JSON_terrain_dict[coords])
+            terrain_dict[coords] = terrain_tile(x, y, canvas, index, tile_dict)
+            
+        loc_dict.clear()
+        JSON_loc_dict = json.loads(JSON_dict['locations'])
+        for n in JSON_loc_dict.keys():
+            loc_data = JSON_loc_dict[n]
+            number = int(loc_data['number'])
+            x = int(loc_data['x'])
+            y = int(loc_data['y'])
+            width = int(loc_data['width'])
+            height = int(loc_data['height'])
+            loc = Location((x,y), (width, height), number)
+            loc.highlighted = True
+            loc.unmouseover()
+            loc.highlighted = False
+            loc_dict[number] = loc
+            
+            explosions = loc_data['explosions']
+            for c in explosions.keys():
+                count = int(c)
+                ob.locs[count] = ob.locs.get(count, []) + [loc]
+                
+                explosion_dict = explosions[c][0]
+                name = explosion_dict['name']
+                player = explosion_dict['player']
+                sprite = bool(explosion_dict['sprite'])
+                explosion = Explosion(name, player, sprite)
+                loc.place_explosion(explosion, count)
+                
+            walls = loc_data['walls']
+            for c in walls.keys():
+                count = int(c)
+                triple = tuple(walls[c])
+                ob.walls[count] = ob.walls.get(count, []) + [(loc, triple[2])]
+                wall = Wall(triple[0], triple[1])
+                loc.edit_wall(wall, count, triple[2])
+                
+        num_locs.replace(int(JSON_dict['num locs']))
+        
+        JSON_ob_dict = json.loads(JSON_dict['obstacle'])
+        ob.num_counts = int(JSON_ob_dict['num counts'])
+        timing = JSON_ob_dict['timing']
+        for c in timing.keys():
+            count = int(c)
+            ob.timing[count] = int(timing[c])
+
+        canvas.rename_locations(num_locs, loc_dict) 
+        canvas.organize_layers()
+        canvas.load(tool.num)
+        if tool.num == 3:
+            ob.show_count(str(ob.timing[1]))
+            try:
+                for item in ob.walls[1]:
+                    item[0].search_walls(1, ob.num_counts)
+            except:
+                pass
+        
+current_save_file = StringVar()
+current_save_file.set('')
+        
+def save(main_window, canvas, terrain_dict, loc_dic, num_locs, ob, ob_num, current_file, event):
+    if current_file.get() == '':
+        save_as(main_window, canvas, terrain_dict, loc_dic, num_locs, ob, ob_num, current_file, None)
+    else:
+        file = open(current_file.get(), 'w')
+        dictionary = {}
+        dictionary['terrain'] = json.dumps(terrain_dict, default=default)
+        
+        dictionary['locations'] = json.dumps(loc_dic, default=default)
+        dictionary['num locs'] = num_locs.num
+        
+        dictionary['obstacle'] = json.dumps(ob, default=default)
+        file.write(json.dumps(dictionary))
+        file.close()
+
+def save_as(main_window, canvas, terrain_dict, loc_dic, num_locs, ob, ob_num, current_file, event):
+    file = filedialog.asksaveasfile(mode='w', initialdir = './', title = 'File name:', filetypes = [('JavaScript Object Notation file', '*.json')])
+    if file is not None:
+        current_file.set(file.name)
+        dictionary = {}
+        dictionary['terrain'] = json.dumps(terrain_dict, default=default)
+        
+        dictionary['locations'] = json.dumps(loc_dic, default=default)
+        dictionary['num locs'] = num_locs.num
+        
+        dictionary['obstacle'] = json.dumps(ob, default=default)
+        
+        dictionary['ob_num'] = ob_num.get()
+        
+        file.write(json.dumps(dictionary))
+        file.close()
+
+root.bind('<Control-KeyPress-N>', lambda event: new_file(root, display, terrain_tiles, locations_numerical, loc_count, OBSTACLE, current_save_file, event))
+root.bind('<Control-KeyPress-O>', lambda event: open_file(root, display, terrain_tiles, tileimages, locations_numerical, loc_count, OBSTACLE, ob_number, selected_tool, event))
+root.bind('<Control-KeyPress-S>', lambda event: save(root, display, terrain_tiles, locations_numerical, loc_count, OBSTACLE, ob_number, current_save_file, event))
+root.bind('<Control-Shift-KeyPress-S>', lambda event: save_as(root, display, terrain_tiles, locations_numerical, loc_count, OBSTACLE, ob_number, current_save_file, event))
+
+file_menu = Menu(menubar, tearoff=False)
+menubar.add_cascade(label="File", menu=file_menu, underline=0)
+file_menu.add_command(label="New", underline=0, command=lambda: new_file(root, display, terrain_tiles, locations_numerical, loc_count, OBSTACLE, current_save_file, None), accelerator="Ctrl+N")
+file_menu.add_command(label="Open", underline=0, command=lambda: open_file(root, display, terrain_tiles, tileimages, locations_numerical, loc_count, OBSTACLE, ob_number, selected_tool, None), accelerator="Ctrl+O")
+file_menu.add_command(label="Save", underline=0, command=lambda: save(root, display, terrain_tiles, locations_numerical, loc_count, OBSTACLE, ob_number, current_save_file, None), accelerator="Ctrl+S")
+file_menu.add_command(label="Save As", underline=1, command=lambda: save_as(root, display, terrain_tiles, locations_numerical, loc_count, OBSTACLE, ob_number, current_save_file, None), accelerator="Ctrl+Shift+S")
+file_menu.add_command(label="Exit", underline=0, command=root.destroy, accelerator="Alt+F4")
+
+help_menu = Menu(menubar, tearoff=False)
+menubar.add_cascade(label="Help", menu=help_menu, underline=0)
+help_menu.add_command(label="Instructions", underline=0, accelerator="F1")
+help_menu.add_command(label="About", underline=0, accelerator="F4")
+
+operating_system = platform.system()
 
 #the data_number class stores an int object self.num and has methods for modifying self.num
 class data_number:
@@ -185,7 +338,7 @@ transparent_pixel = tk.PhotoImage(file='./Images/Misc/blank.png')
 #container widget which holds all of the widgets used to view and design obstacles
 Editor = ttk.Frame(root)
 Editor.columnconfigure(0,weight=1)
-Editor.rowconfigure(0, weight=10)
+Editor.rowconfigure(0, weight=1000)
 Editor.rowconfigure(1, weight=1)
 Editor.rowconfigure(2, weight=1)
 Editor.grid(row=0, column=0, sticky='NESW')
@@ -198,22 +351,55 @@ darkgraystyle.configure('darkgray.TFrame', background = '#484c4f')
 buttonStyle = ttk.Style()
 buttonStyle.map('Highlight.TButton')
 
+class ob_canvas(tk.Canvas):
+    def __init__(self, blank, *args, **kwargs):
+        tk.Canvas.__init__(self, *args, **kwargs)
+        self.blank = blank
+        self.layers = ('terrain', 'location', 'wall', 'explosion', 'highlight', 'grid', 'locationMouseover', 'locationExtras')
+        self.create_layers(self.layers)
+        
+    def create_layers(self, layers):
+        for layer in layers:
+            if len(self.find_withtag(layer)) == 0:
+                self.create_image(0, 0, anchor='nw', tag=layer, image=self.blank)
+        self.organize_layers()
+        
+    #a new object placed on the canvas will appear at the top layer by default, so the layers need to be reorderable
+    def organize_layers(self):
+        self.tag_raise('locationExtras')
+        self.tag_lower('grid', 'locationExtras')
+        self.tag_lower('locationMouseover', 'grid')
+        self.tag_lower('highlight', 'locationMouseover')
+        self.tag_lower('explosion', 'highlight')
+        self.tag_lower('wall', 'explosion')
+        self.tag_lower('location', 'wall')
+        self.tag_lower('terrain', 'location')
+
+    def clear(self):
+        for layer in ('terrain', 'location', 'wall', 'explosion', 'highlight', 'locationMouseover', 'locationExtras'):
+            self.delete(layer)
+        self.create_layers(self.layers)
+        
+    def load(self, tool):
+        for layer in ('terrain', 'location', 'wall', 'explosion', 'highlight', 'locationMouseover', 'locationExtras'):
+            self.itemconfig(layer, state='hidden')
+        if tool > 0:
+            self.itemconfig('terrain', state='normal')
+        if tool > 1:
+            self.itemconfig('location', state='normal')
+            self.itemconfig('locationExtras', state='normal')
+            
+    def rename_locations(self, num_locs, loc_dict):
+        for i in range(1, num_locs.num + 1):
+            loc_dict[i].write_name(num_locs)
+        
 #the display on which terrain, locations, and explosions can be placed
-display = tk.Canvas(Editor, bg="black")
+display = ob_canvas(transparent_pixel, Editor, bg="black")
 display['borderwidth'] = 2
 display['relief'] = 'groove'
 display.grid(column=0, row=0, sticky='NESW')
 
-#creates the various image layers the display needs
-display.create_image(0, 0, anchor='nw', tag='terrain', image=transparent_pixel)
-display.create_image(0, 0, anchor='nw', tag='location', image=transparent_pixel)
-display.create_image(0, 0, anchor='nw', tag='wall', image=transparent_pixel)
-display.create_image(0, 0, anchor='nw', tag='explosion', image=transparent_pixel)
-display.create_image(0, 0, anchor='nw', tag='highlight', image=transparent_pixel)
-display.create_image(0, 0, anchor='nw', tag='grid', image=transparent_pixel)
-display.create_image(0, 0, anchor='nw', tag='locationMouseover', image=transparent_pixel)
-display.create_image(0, 0, anchor='nw', tag='locationExtras', image=transparent_pixel)
-
+#this allows the user to mouseover the display to unfocus text entry boxes so that subsequent key presses won't get typed in
 def mouseover_display(event):
     display.focus_set()
     
@@ -223,17 +409,6 @@ display.bind('<Enter>', mouseover_display)
 def recreate_layer(layer):
     if len(display.find_withtag(layer)) == 0:
         display.create_image(0, 0, anchor='nw', tag=layer, image=transparent_pixel)
-
-#reorders the layers on the display
-def organize_layers():
-    display.tag_raise('locationExtras')
-    display.tag_lower('grid', 'locationExtras')
-    display.tag_lower('locationMouseover', 'grid')
-    display.tag_lower('highlight', 'locationMouseover')
-    display.tag_lower('explosion', 'highlight')
-    display.tag_lower('wall', 'explosion')
-    display.tag_lower('location', 'wall')
-    display.tag_lower('terrain', 'location')
     
 gridsize = data_number(32) #the side length of the grid tiles in pixels
 (W, H) = (data_number(2), data_number(2)) #controls the dimensions of locations/terrain one places (set by default to 2x2 tiles)
@@ -254,10 +429,6 @@ def draw_grid(d, event):
         L = display.create_line([(0, i), (width, i)], tag='grid', fill='#808080')
         
     display.tag_lower('grid', 'locationExtras')
-
-#redraws the grid if the window is resized
-#def redraw_grid(event, d):
-    #draw_grid(d.num)
 
 #calculation used to snap objects to the grid
 def snap(d, width, height):
@@ -293,7 +464,7 @@ def highlight_atCursor(d, w, h, tool, event):
         display.create_image(x, y, anchor = 'nw', tag='highlight', image=highlight_resizes[(w, h)])
     if tool > 1:
         highlight_location(locations_numerical, loc_count)
-    organize_layers()
+    display.organize_layers()
 
 #container widget which holds the widgets used to edit obstacles
 editor_controls = ttk.Frame(Editor, style='gray.TFrame')
@@ -334,16 +505,23 @@ def unbind_hotkeys(widget_lists):
         
 
 #MODE SELECTION BUTTON FUNCTIONS
-def press_Terrain_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_btn, other_mode_btns, canvas, tool, d, w, h, tile_choice, loc_dictionary, event=None):
+def press_Terrain_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_btn, other_mode_btns, canvas, tool, d, w, h, tile_choice, loc_dictionary, OS, event=None):
+    if OS == 'Darwin':
+        right_mouse = '2'
+    else:
+        right_mouse = '3'
     highlight_atCursor(d, w, h, 1, None)
     tool.replace(1)
     canvas.bind('<Motion>', lambda event: highlight_atCursor(d, w, h, 1, event))
     d.replace(32)
     canvas.bind('<Button-1>', lambda event: place_terrain(canvas, tile_choice, w, h, event))
     canvas.bind('<B1-Motion>', lambda event: place_terrain(canvas, tile_choice, w, h, event))
-    canvas.bind('<Button-3>', lambda event: delete_terrain(canvas, w, h, event))
-    canvas.bind('<B3-Motion>', lambda event: delete_terrain(canvas, w, h, event))
+    canvas.bind('<Button-' + right_mouse + '>', lambda event: delete_terrain(canvas, w, h, event))
+    canvas.bind('<B' + right_mouse + '-Motion>', lambda event: delete_terrain(canvas, w, h, event))
     canvas.unbind('<ButtonRelease-1>')
+    canvas.unbind('<KeyRelease-w>')
+    canvas.unbind('<KeyRelease-r>')
+    canvas.unbind('<KeyRelease-d>')
     hide_locations(loc_dictionary)
     hide_obstacle()
     arrange_UIs(thisUI, otherUIs)
@@ -353,16 +531,23 @@ def press_Terrain_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_b
         btn.config(state='normal')
     mode_btn.config(state='disabled')
     
-def press_Location_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_btn, other_mode_btns, canvas, tool, gridsize_choice, d, w, h, loc_dictionary, event=None):
+def press_Location_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_btn, other_mode_btns, canvas, tool, gridsize_choice, d, w, h, loc_dictionary, num_locs, OS, event=None):
+    if OS == 'Darwin':
+        right_mouse = '2'
+    else:
+        right_mouse = '3'
     highlight_atCursor(d, w, h, 2, None)
     tool.replace(2)
     d.replace(gridsize_choice)
     canvas.bind('<Motion>', lambda event: highlight_atCursor(d, w, h, 2, event))
-    canvas.bind('<ButtonRelease-1>', lambda event: place_location(d, w, h, loc_dictionary, event))
-    canvas.bind('<Button-3>', delete_location)
+    canvas.bind('<ButtonRelease-1>', lambda event: place_location(d, w, h, loc_dictionary, num_locs, event))
+    canvas.bind('<Button-' + right_mouse + '>', lambda event: delete_location(loc_dictionary, num_locs, event))
     canvas.bind('<B1-Motion>', lambda event: move_location(d, w, h, loc_dictionary, event))
-    canvas.unbind('<B3-Motion>')
+    canvas.unbind('<B' + right_mouse + '-Motion>')
     canvas.unbind('<Button-1>')
+    canvas.unbind('<KeyRelease-w>')
+    canvas.unbind('<KeyRelease-r>')
+    canvas.unbind('<KeyRelease-d>')
     show_locations(loc_dictionary)
     hide_obstacle()
     arrange_UIs(thisUI, otherUIs)
@@ -373,18 +558,23 @@ def press_Location_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_
     mode_btn.config(state='disabled')
 
 
-def press_Obstacle_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_btn, other_mode_btns, canvas, tool, d, w, h, loc_dictionary, ob, count_display, wall_menu, wall_player, event=None):
+def press_Obstacle_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_btn, other_mode_btns, canvas, tool, d, w, h, loc_dictionary, num_locs, ob, count_display, wall_menu, wall_player, OS, event=None):
+    if OS == 'Darwin':
+        right_mouse = '2'
+    else:
+        right_mouse = '3'
     tool.replace(3)
     canvas.delete('highlight')
     recreate_layer('highlight')
     canvas.bind('<Motion>', lambda event: highlight_atCursor(d, w, h, 3, event))
-    canvas.bind('<Button-1>', lambda event: place_explosion(event, ob))
-    canvas.bind('<Button-3>', lambda event: delete_explosion(event, ob))
+    canvas.bind('<Button-1>', lambda event: place_explosion(event, loc_dictionary, num_locs, ob))
+    canvas.bind('<Button-' + right_mouse + '>', lambda event: delete_explosion(event, loc_dictionary, num_locs, ob))
     canvas.bind('<KeyRelease-w>', lambda event: place_wall(event, ob, wall_menu, wall_player, loc_dictionary))
     canvas.bind('<KeyRelease-r>', lambda event: remove_wall(event, ob, loc_dictionary))
+    canvas.bind('<KeyRelease-d>', lambda event: delete_wall(event, ob, loc_dictionary, canvas))
     canvas.unbind('<ButtonRelease-1>')
     canvas.unbind('<B1-Motion>')
-    canvas.unbind('<B3-Motion>')
+    canvas.unbind('<B' + right_mouse + '-Motion>')
     arrange_UIs(thisUI, otherUIs)
     show_locations(loc_dictionary)
     ob.show_count(ob.timing[ob.count])
@@ -399,20 +589,20 @@ Terrain_btn = hotkey_ttkBtn(mode_select, text="Terrain", takefocus=False, window
 Location_btn = hotkey_ttkBtn(mode_select, text="Location", takefocus=False, window=root, hotkey='<Alt-KeyPress-l>', callback=None)
 Obstacle_btn = hotkey_ttkBtn(mode_select, text="Obstacle", takefocus=False, window=root, hotkey='<Alt-KeyPress-o>', callback=None)
                         
-Terrain_btn.config(command=lambda: press_Terrain_btn(Terrain_UI, [Location_UI, Obstacle_UI], Terrain_hotkeys, [Location_hotkeys, Obstacle_hotkeys], Terrain_btn, [Location_btn, Obstacle_btn], display, selected_tool, gridsize, W, H, selected_tile, locations_numerical))
-Terrain_btn.cmd(lambda event: press_Terrain_btn(Terrain_UI, [Location_UI, Obstacle_UI], Terrain_hotkeys, [Location_hotkeys, Obstacle_hotkeys], Terrain_btn, [Location_btn, Obstacle_btn], display, selected_tool, gridsize, W, H, selected_tile, locations_numerical, event))
+Terrain_btn.config(command=lambda: press_Terrain_btn(Terrain_UI, [Location_UI, Obstacle_UI], Terrain_hotkeys, [Location_hotkeys, Obstacle_hotkeys], Terrain_btn, [Location_btn, Obstacle_btn], display, selected_tool, gridsize, W, H, selected_tile, locations_numerical, operating_system))
+Terrain_btn.cmd(lambda event: press_Terrain_btn(Terrain_UI, [Location_UI, Obstacle_UI], Terrain_hotkeys, [Location_hotkeys, Obstacle_hotkeys], Terrain_btn, [Location_btn, Obstacle_btn], display, selected_tool, gridsize, W, H, selected_tile, locations_numerical, operating_system, event))
 Terrain_btn.keybind()
 Terrain_btn_tip = tooltip(root, Terrain_btn, '(Alt+T)', (20,10))
 Terrain_btn.grid(row=0, column=0)
 
-Location_btn.config(command=lambda: press_Location_btn(Location_UI, [Terrain_UI, Obstacle_UI], Location_hotkeys,  [Terrain_hotkeys, Obstacle_hotkeys], Location_btn, [Terrain_btn, Obstacle_btn], display, selected_tool, int(gridsize_changed.get()), gridsize, W, H, locations_numerical))
-Location_btn.cmd(lambda event: press_Location_btn(Location_UI, [Terrain_UI, Obstacle_UI], Location_hotkeys, [Terrain_hotkeys, Obstacle_hotkeys], Location_btn, [Terrain_btn, Obstacle_btn], display, selected_tool, int(gridsize_changed.get()), gridsize, W, H, locations_numerical, event))
+Location_btn.config(command=lambda: press_Location_btn(Location_UI, [Terrain_UI, Obstacle_UI], Location_hotkeys,  [Terrain_hotkeys, Obstacle_hotkeys], Location_btn, [Terrain_btn, Obstacle_btn], display, selected_tool, int(gridsize_changed.get()), gridsize, W, H, locations_numerical, loc_count, operating_system))
+Location_btn.cmd(lambda event: press_Location_btn(Location_UI, [Terrain_UI, Obstacle_UI], Location_hotkeys, [Terrain_hotkeys, Obstacle_hotkeys], Location_btn, [Terrain_btn, Obstacle_btn], display, selected_tool, int(gridsize_changed.get()), gridsize, W, H, locations_numerical, loc_count, operating_system, event))
 Location_btn.keybind()
 Location_btn_tip = tooltip(root, Location_btn, '(Alt+L)', (20,10))
 Location_btn.grid(row=1, column=0)
 
-Obstacle_btn.config(command=lambda: press_Obstacle_btn(Obstacle_UI, [Terrain_UI, Location_UI], Obstacle_hotkeys, [Terrain_hotkeys, Location_hotkeys], Obstacle_btn, [Location_btn, Terrain_btn], display, selected_tool, gridsize, W, H, locations_numerical, OBSTACLE, count_display, wall_units_menu, selected_wall_player))
-Obstacle_btn.cmd(lambda event: press_Obstacle_btn(Obstacle_UI, [Terrain_UI, Location_UI], Obstacle_hotkeys, [Terrain_hotkeys, Location_hotkeys], Obstacle_btn, [Location_btn, Terrain_btn], display, selected_tool, gridsize, W, H, locations_numerical, OBSTACLE, count_display, wall_units_menu, selected_wall_player, event))
+Obstacle_btn.config(command=lambda: press_Obstacle_btn(Obstacle_UI, [Terrain_UI, Location_UI], Obstacle_hotkeys, [Terrain_hotkeys, Location_hotkeys], Obstacle_btn, [Location_btn, Terrain_btn], display, selected_tool, gridsize, W, H, locations_numerical, loc_count, OBSTACLE, count_display, wall_units_menu, selected_wall_player, operating_system))
+Obstacle_btn.cmd(lambda event: press_Obstacle_btn(Obstacle_UI, [Terrain_UI, Location_UI], Obstacle_hotkeys, [Terrain_hotkeys, Location_hotkeys], Obstacle_btn, [Location_btn, Terrain_btn], display, selected_tool, gridsize, W, H, locations_numerical, loc_count, OBSTACLE, count_display, wall_units_menu, selected_wall_player, operating_system, event))
 Obstacle_btn.keybind()
 Obstacle_btn_tip = tooltip(root, Obstacle_btn, '(Alt+O)', (20,10))
 Obstacle_btn.grid(row=2, column=0)
@@ -588,34 +778,43 @@ custom_size_btn = ttk.Checkbutton(custom_sizes, text='Custom size:', takefocus=F
 use_custom_size.trace('w', lambda *args, use_custom_size=use_custom_size: enable_custom_size(use_custom_size.get(), custom_width_btn, custom_height_btn, fixed_sizes_options))
 custom_size_btn.grid(column=0,row=0, sticky='W')
 
-delete_terrain_btn = hotkey_ttkBtn(toolkit, window=root, hotkey='<BackSpace>', text='Delete all terrain', takefocus=False, callback=lambda event: delete_all_terrain(display, terrain, event), command=lambda: delete_all_terrain(display, terrain))
-delete_terrain_tip = tooltip(root, delete_terrain_btn, '(BackSpace)', (20, 10))
+delete_terrain_btn = hotkey_ttkBtn(toolkit, window=root, hotkey='<Control-KeyPress-BackSpace>', text='Delete all terrain', takefocus=False, callback=lambda event: delete_all_terrain(display, terrain_tiles, event), command=lambda: delete_all_terrain(display, terrain_tiles))
+delete_terrain_tip = tooltip(root, delete_terrain_btn, '(Ctrl+BackSpace)', (20, 10))
 delete_terrain_btn.grid(row=1, column=0)
 
-terrain = {} #hashes coordinates (x,y) to the terrain tile whose top left corner is at (x,y)
+class terrain_tile:
+    def __init__(self, x, y, canvas, index, imgs):
+        self.img = canvas.create_image(x, y, anchor='nw', tag='terrain', image=imgs[index])
+        self.index = index
+        
+    def to_json(self):
+        return str(self.index)
+
+terrain_tiles = {} #hashes coordinates (x,y) to the terrain tile whose top left corner is at (x,y)
 
 #places terrain tiles in the highlighted region when the left mouse button is pressed
 def place_terrain(canvas, tile_choice, w, h, event):
     width = w.num
     height = h.num
-    if tile_choice.num >= 0:
+    tile_index = tile_choice.num
+    if tile_index >= 0:
         for i in range(0,width):
             for j in range(0,height):
                 (a,b) = (snap(32, width, height)[0] + 32*i, snap(32, width, height)[1] + 32*j)
                 try:
-                    canvas.delete(terrain[(a,b)])
-                    del terrain[(a,b)]
+                    canvas.delete(terrain_tiles[str(a) + ' ' + str(b)].img)
+                    del terrain_tiles[(a,b)]
                 except:
                     pass
-                T = canvas.create_image(a, b, anchor='nw', tag='terrain', image=tileimages[tile_choice.num])
-                terrain[(a,b)] = T
+                tile = terrain_tile(a, b, canvas, tile_index, tileimages)
+                terrain_tiles[str(a) + ' ' + str(b)] = tile
     highlight_atCursor(data_number(32), w, h, 1, None)
     canvas.tag_lower('terrain', 'location')
 
 #deletes terrain tiles in the highlighted region when the right mouse button is pressed
 def delete_all_terrain(canvas, tileMap, event=None):
     for tile in list(tileMap.keys()):
-        canvas.delete(tileMap[tile])
+        canvas.delete(tileMap[tile].img)
         del tileMap[tile]
 
 def delete_terrain(canvas, w, h, event):
@@ -626,8 +825,8 @@ def delete_terrain(canvas, w, h, event):
         for j in range(0, height):
             (a,b) = (snap(32, width, height)[0] + 32*i, snap(32, width, height)[1] + 32*j)
             try:
-                canvas.delete(terrain[(a,b)])
-                del terrain[(a,b)]
+                canvas.delete(terrain_tiles[str(a) + ' ' + str(b)].img)
+                del terrain_tiles[str(a) + ' ' + str(b)]
             except:
                 pass
 #/////////////////////////////////////////////////////////////////////////////////////////
@@ -663,17 +862,14 @@ for i in range(1,11):
         location_mouseover_overlays[(i,j)] = ImageTk.PhotoImage(img_resized)
 
 locations_numerical = {} #hashes numbers n to the nth location placed
-loc_count = 0 #tracks the number of locations currently placed
+loc_count = data_number(0) #tracks the number of locations currently placed
 
 
-def delete_all_locations(loc_dict, number, event=None):
-    while number > 0:
-        loc_dict[number].delete()
-        number -= 1
-        
-def rename_locations(rename_locations):
-    for i in range(1, loc_count + 1):
-        locations_numerical[i].write_name()
+def delete_all_locations(loc_dict, num_locs, event=None):
+    n = num_locs.num
+    while n > 0:
+        loc_dict[n].delete(loc_dict, num_locs)
+        n -= 1
         
 def resize_grid(d, gridsize_changed):
     new_d = int(gridsize_changed.get())
@@ -685,17 +881,18 @@ location_naming_options = ttk.LabelFrame(toolkit, text='Naming convention:')
 location_naming_options.grid(row=0, column=0, sticky = 'NW')
 
 location_prefix = StringVar()
-location_prefix.trace('w', lambda name, index, mode, location_prefix=location_prefix: rename_locations(location_prefix))
+location_prefix.trace('w', lambda name, index, mode, location_prefix=location_prefix: display.rename_locations(loc_count, locations_numerical))
 location_prefix_entry = ttk.Entry(location_naming_options, textvariable=location_prefix)
 location_prefix_entry.grid(row=0, column=0)
 
 naming_convention = StringVar()
-naming_convention.trace('w', lambda name, index, mode, naming_convention=naming_convention: rename_locations(naming_convention))
+naming_convention.trace('w', lambda *args, naming_convention=naming_convention: display.rename_locations(loc_count, locations_numerical))
 naming_conventions = ('Numeric (no leading 0\'s)', 'Numeric (leading 0\'s)', 'Alphabetic (A,B,C,...)')
 naming_conventions_menu = ttk.OptionMenu(location_naming_options, naming_convention, naming_conventions[0], naming_conventions[0], naming_conventions[1], naming_conventions[2])
 naming_conventions_menu.grid(row=1, column=0)
 
-delete_locations_btn = hotkey_ttkBtn(toolkit, text='Delete all locations', takefocus=False, window=root, hotkey='<BackSpace>', callback=lambda event: delete_all_locations(locations_numerical, loc_count, event), command=lambda: delete_all_locations(locations_numerical, loc_count))
+delete_locations_btn = hotkey_ttkBtn(toolkit, text='Delete all locations', takefocus=False, window=root, hotkey='<Control-KeyPress-BackSpace>', callback=lambda event: delete_all_locations(locations_numerical, loc_count, event), command=lambda: delete_all_locations(locations_numerical, loc_count))
+delete_locations_tip = tooltip(root, delete_locations_btn, '(Ctrl+BackSpace)', (20, 10))
 delete_locations_btn.grid(row=1, column=0, sticky='S')
 
 grid_resize_frame = ttk.LabelFrame(toolkit, text='Grid size (px):')
@@ -734,6 +931,20 @@ class Location:
         self.height = dim[1]
 
         self.borders = []
+        
+        self.highlighted = False
+        self.mouseover_overlay = None
+        self.motion = False
+        self.resizing = [False, False]
+        
+        self.explosions = {}
+        self.walls = {}
+        
+        self.draw_borders()
+        
+    def draw_borders(self):
+        for border in self.borders:
+            display.delete(border)
         self.borders.append(display.create_line((self.x, self.y), (self.x + 32*self.width, self.y), tag='locationExtras', fill='#20ff26'))
         self.borders.append(display.create_line((self.x + 32*self.width, self.y), (self.x + 32*self.width, self.y + 32*self.height), tag='locationExtras', fill='#20ff26'))
         self.borders.append(display.create_line((self.x, self.y + 32*self.height), (self.x + 32*self.width, self.y + 32*self.height), tag='locationExtras', fill='#20ff26'))
@@ -743,13 +954,7 @@ class Location:
         self.bottom = self.borders[2]
         self.left = self.borders[3]
         
-        self.highlighted = False
-        self.motion = False
-        
-        self.explosions = {}
-        self.walls = {}
-        
-    def write_name(self):
+    def write_name(self, num_locs):
         try:
             display.delete(self.name)
         except:
@@ -758,10 +963,10 @@ class Location:
         if naming_convention.get() == naming_conventions[0]:
             numbering = str(self.number)
         elif naming_convention.get() == naming_conventions[1]:
-            numbering = '0'*(len(str(loc_count)) - len(str(self.number))) + str(self.number)
+            numbering = '0'*(len(str(num_locs.num)) - len(str(self.number))) + str(self.number)
         elif naming_convention.get() == naming_conventions[2]:
             alphabet = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
-            if loc_count <= 26:
+            if num_locs.num <= 26:
                 numbering = alphabet[self.number - 1]
             else:
                 first_letter = max(0, int((self.number - 1)/26))
@@ -773,10 +978,24 @@ class Location:
     def mouseover(self):
         x = display.winfo_pointerx() - display.winfo_rootx()
         y = display.winfo_pointery() - display.winfo_rooty()
-        if self.x < x < self.x + 32*self.width and self.y < y < self.y + 32*self.height:
-            return True;
-        else:
-            return False
+        bounds_x = 0
+        bounds_y = 0
+        sensitivity = min(8, self.width*4) 
+        if self.x < x < self.x + 32*self.width:
+            if self.x < x <= self.x + sensitivity:
+                bounds_x = 2
+            elif self.x + 32*self.width - sensitivity <= x < self.x + 32*self.width:
+                bounds_x = 3
+            else:
+                bounds_x = 1
+        if self.y < y < self.y + 32*self.height:
+            if self.y < y <= self.y + sensitivity:
+                bounds_y = 2
+            elif self.y + 32*self.height - sensitivity <= y < self.y + 32*self.height:
+                bounds_y = 3
+            else:
+                bounds_y = 1
+        return (bounds_x, bounds_y)
             
     def mouseover_highlight(self):
         if not self.highlighted:
@@ -786,7 +1005,7 @@ class Location:
             except:
                 pass
             self.mouseover_overlay = display.create_image(self.x, self.y, anchor='nw', tag='locationMouseover', image=location_mouseover_overlays[(self.width,self.height)])
-            organize_layers()
+            display.organize_layers()
             
     def unmouseover(self):
         if self.highlighted:
@@ -796,10 +1015,9 @@ class Location:
             except:
                 pass
             self.overlay = display.create_image(self.x, self.y, anchor='nw', tag='location', image=location_overlays[(self.width,self.height)])
-            organize_layers()
+            display.organize_layers()
             
-    def delete(self):
-        global loc_count, locations_numerical
+    def delete(self, loc_dict, num_locs):
         display.delete(self.name)
         try:
             display.delete(self.mouseover_overlay)
@@ -817,41 +1035,66 @@ class Location:
             except:
                 pass
             del self.explosions[key]
-        del locations_numerical[self.number]
-        for i in range(self.number + 1, loc_count + 1):
-            loc = locations_numerical[i]
+        del loc_dict[self.number]
+        for i in range(self.number + 1, num_locs.num + 1):
+            loc = loc_dict[i]
             loc.number -= 1
-            loc.write_name()
-            locations_numerical[loc.number] = loc
-        loc_count -= 1
-        
-    def delete_onClick(self):
-        if mouseover(self):
-            self.delete()
+            loc.write_name(num_locs)
+            loc_dict[loc.number] = loc
+        num_locs.add(-1)
             
     def move(self, d):
-        x = snap(d, self.width, self.height)[0]
-        y = snap(d, self.width, self.height)[1]
-        self.motion = True
+        if (self.mouseover()[0] == 1 and self.mouseover()[1] == 1 and not self.motion and self.resizing == [False, False]) or self.motion:
+            x = snap(d, self.width, self.height)[0]
+            y = snap(d, self.width, self.height)[1]
+            self.motion = True
+            for count in self.explosions.keys():
+                for explosion in self.explosions[count]:
+                    display.coords(explosion[1], x + 16*self.width, y + 16*self.width)
+            self.x = x
+            self.y = y
+            self.topleft_corner = (x,y)
+            
+        if ((self.mouseover()[0] > 1 or self.mouseover()[1] > 1) and self.resizing == [False,False] and not self.motion) or (self.resizing[0] or self.resizing[1]):
+            x = round((display.winfo_pointerx() - display.winfo_rootx())/32)*32 + (self.x % 32)
+            y = round((display.winfo_pointery() - display.winfo_rooty())/32)*32 + (self.y % 32)
+            if self.resizing == [False, False]:
+                self.center = (self.x + 16*self.width, self.y + 16*self.height)
+                if self.mouseover()[0] > 1:
+                    self.resizing[0] = True
+                if self.mouseover()[1] > 2:
+                    self.resizing[1] = True
+
+            if self.resizing[0]:
+                if x < self.center[0]:
+                    self.width += int((self.x - x)/32)
+                    print(self.width)
+                    self.x = x
+                else:
+                    self.width = int(max(1, abs(self.x - x)/32))
+                    
+            if self.resizing[1]:
+                if y < self.center[1]:
+                    self.height += int((self.y - y)/32)
+                    self.y = y
+                else:
+                    self.height = int(max(1, abs(self.y - y)/32))
+
+        self.topleft_corner = (self.x, self.y)
+        self.dim = (self.width, self.height)
+        
+
         display.delete('highlight')
-        display.coords(self.mouseover_overlay, x, y)
-        display.coords(self.name, x + 2, y + 2)
-        display.coords(self.top, x, y, x + 32*self.width, y)
-        display.coords(self.right, x + 32*self.width, y, x + 32*self.width, y + 32*self.height)
-        display.coords(self.bottom, x, y + 32*self.height, x + 32*self.width, y + 32*self.height)
-        display.coords(self.left, x, y, x, y + 32*self.height)
-        for count in self.explosions.keys():
-            for explosion in self.explosions[count]:
-                display.coords(explosion[1], x + 16*self.width, y + 16*self.width)
-        self.x = x
-        self.y = y
-        self.topleft_corner = (x,y)
+        display.delete(self.mouseover_overlay)
+        self.mouseover_overlay = display.create_image(self.x, self.y, anchor='nw', tag='locationMouseover', image=location_mouseover_overlays[(self.width,self.height)])
+        display.coords(self.name, self.x + 2, self.y + 2)
+        self.draw_borders()
         recreate_layer('highlight')
-        organize_layers()
+        display.organize_layers()
             
     def place_explosion(self, explosion, count):
         self.explosions[count] = self.explosions.get(count, []) + [(explosion, display.create_image(self.x + 16*self.width, self.y + 16*self.height, anchor='center', tag='explosion', image=explosion.img))]
-        organize_layers()
+        display.organize_layers()
         
     def delete_explosion(self, count):
         display.delete(self.explosions[count][-1][1])
@@ -865,63 +1108,51 @@ class Location:
         if action == 'r':
             img = 0
         self.walls[count] = (wall, img, action)
-        organize_layers()
-        
-    def delete_wall(self, count):
-        display.delete(self.walls[count][-1][1])
-        self.walls[count].pop(-1)
-        if self.walls[count] == []:
-            del self.walls[count]
+        display.organize_layers()
             
     def search_walls(self, count, num_counts):
+        wall_count = 0
         i = count
-        wall = False
         while i > 0:
             try:
                 if self.walls[i][2] == 'c':
-                    wall = self.walls[i]
+                    display.itemconfigure(self.walls[i][1], state='normal')
+                    wall_count = i
                     break
             except:
                 pass
             i -= 1
-        if i > 0:
-            flag = True
-            for j in range(i+1, count+1):
+            if i == 0:
+                i = num_counts
+            if i == count:
+                break
+        if wall_count != count and wall_count > 0:
+            j = count
+            while j > 0:
                 try:
                     if self.walls[j][2] == 'r':
-                        display.itemconfigure(wall[1], state='hidden')
-                        flag = False
+                        display.itemconfigure(self.walls[wall_count][1], state='hidden')
                         break
                 except:
                     pass
-            if flag:
-                display.itemconfigure(wall[1], state='normal')
-        else:
-            i = count + 1
-            while i <= num_counts:
-                try:
-                    if self.walls[i][2] == 'c':
-                        wall = self.walls[i]
-                        break
-                except:
-                    pass
-                i += 1
-            if i <= num_counts:
-                flag = True
-                for j in range(1, count):
-                    try:
-                        if self.walls[j][2] == 'r':
-                            display.itemconfigure(wall[1], state='hidden')
-                            flag = False
-                            break
-                    except:
-                        pass
-                if flag:
-                    display.itemconfigure(wall[1], state='normal')
+                j -= 1
+                if j == 0:
+                    j = num_counts
+                if j == wall_count:
+                    break
+                    
+    def to_json(self):
+        explosions = {}
+        for count in self.explosions.keys():
+            explosions[count] = self.explosions[count][0]
+        walls = {}
+        for count in self.walls.keys():
+            walls[count] = (self.walls[count][0].name, self.walls[count][0].player, self.walls[count][2])
+        return {'number': self.number, 'x': self.x, 'y': self.y, 'width': self.width, 'height': self.height, 'explosions': explosions, 'walls': walls}
             
 def move_location(d, w, h, loc_dictionary, event):
     highlight_atCursor(d, w, h, 2, event=None)
-    n = loc_count
+    n = loc_count.num
     while n > 0:
         loc = loc_dictionary[n]
         if loc.highlighted:
@@ -959,22 +1190,39 @@ def hide_locations(dictionary):
 
 
 #highlights (in green) the top location underneath the mouse cursor           
-def highlight_location(dictionary, number):
+def highlight_location(dictionary, num_locs):
     num = -1
-    for n in range(1, number + 1):
+    for n in range(1, num_locs.num + 1):
         loc = dictionary[n]
         try:
-            if loc.motion:
+            if loc.motion or loc.resizing[0] or loc.resizing[1]:
                 num = loc.number
             else:
                 loc.unmouseover()
         except:
             pass
-    for n in reversed(range(1, number + 1)):
-        loc = dictionary[n]
-        if loc.mouseover() and num in (-1, loc.number):
-            loc.mouseover_highlight()
-            break
+    if num == -1:
+        flag = False
+        for n in reversed(range(1, num_locs.num + 1)):
+            loc = dictionary[n]
+            if loc.mouseover()[0] > 0 and loc.mouseover()[1] > 0:
+                flag = True
+                loc.mouseover_highlight()
+                if loc.mouseover()[0] > 1 and loc.mouseover()[1] > 1:
+                    if selected_tool.num == 2:
+                        display.config(cursor='fleur')
+                elif loc.mouseover()[0] > 1 and loc.mouseover()[1] == 1:
+                    if selected_tool.num == 2:
+                        display.config(cursor='sb_h_double_arrow')
+                elif loc.mouseover()[0] == 1 and loc.mouseover()[1] > 1:
+                    if selected_tool.num == 2:
+                        display.config(cursor='sb_v_double_arrow')
+                else:
+                    if selected_tool.num == 2:
+                        display.config(cursor='hand2')
+                break
+        if not flag:
+            display.config(cursor='arrow')
             
 def open_text_window(string):
     text_window = tk.Toplevel(root)
@@ -982,54 +1230,53 @@ def open_text_window(string):
     message.pack()
 
 #places a location of size w*h tiles at the highlighted region when the left mouse button is clicked
-def place_location(d, w, h, loc_dict, event):
+def place_location(d, w, h, loc_dict, num_locs, event):
 
     #checks if the user is currently moving a location. if so, a new location will not be placed
     flag = False
     for n in loc_dict.keys():
-        if loc_dict[n].motion:
+        if loc_dict[n].motion or loc_dict[n].resizing != [False,False]:
             flag = True
             
     if not flag:
         width = w.num
         height = h.num
-        global loc_count
         x = snap(d.num, width, height)[0]
         y = snap(d.num, width, height)[1]
-        if loc_count < 255 and ((x,y),(width,height)):
-            loc_count += 1
-            loc = Location((x,y), (width, height), loc_count)
-            loc.write_name()
-            locations_numerical[loc_count] = loc
+        if num_locs.num < 255 and ((x,y),(width,height)):
+            num_locs.add(1)
+            loc = Location((x,y), (width, height), num_locs.num)
+            loc.write_name(num_locs)
+            loc_dict[num_locs.num] = loc
             
             #renames the locations after placing the 10th or 100th location if using the leading 0's convention
-            if naming_convention.get() == naming_conventions[1] and loc_count in (10,100):
-                rename_locations('')
+            if naming_convention.get() == naming_conventions[1] and num_locs.num in (10,100):
+                display.rename_locations(num_locs, loc_dict)
             
             #renames the locations after placing the 27th location if using the alphabetic convention
-            if naming_convention.get() == naming_conventions[2] and loc_count == 27:
-                rename_locations('')
+            if naming_convention.get() == naming_conventions[2] and num_locs.num == 27:
+                display.rename_locations(num_locs, loc_dict)
             
-            elif loc_count == 255:
+            elif num_locs.num == 255:
                 open_text_window('You have reached the 255 location limit.')
                 
     for n in loc_dict.keys():
         loc_dict[n].motion = False
+        loc_dict[n].resizing = [False,False]
     highlight_atCursor(d, w, h, 2, None)
     display.tag_lower('location', 'explosion')
                     
-def delete_location(event):
-    global loc_count, locations_numerical
-    for n in reversed(range(1, loc_count + 1)):
-        if locations_numerical[n].mouseover():
-            locations_numerical[n].delete()
+def delete_location(loc_dict, num_locs, event):
+    for n in reversed(range(1, num_locs.num + 1)):
+        if loc_dict[n].mouseover()[0] > 0 and loc_dict[n].mouseover()[1] > 0:
+            loc_dict[n].delete(loc_dict, num_locs)
             #renames the locations after placing the 10th or 100th location if using the leading 0's convention
-            if naming_convention.get() == naming_conventions[1] and loc_count in (9,999):
-                rename_locations('')
+            if naming_convention.get() == naming_conventions[1] and num_locs.num in (9,999):
+                display.rename_locations(num_locs, loc_dict)
             
             #renames the locations after placing the 27th location if using the alphabetic convention
-            if naming_convention.get() == naming_conventions[2] and loc_count == 26:
-                rename_locations('')
+            if naming_convention.get() == naming_conventions[2] and num_locs.num == 26:
+                display.rename_locations(num_locs, loc_dict)
             break
         else:
            continue
@@ -1133,6 +1380,9 @@ class Explosion:
         self.player = player
         self.sprite = sprite
         
+    def to_json(self):
+        return {'name': self.name, 'player': self.player, 'sprite': self.sprite}
+        
 class Obstacle:
     def __init__(self, canvas, count_display, timing_UI):
         self.walls = {}
@@ -1161,11 +1411,12 @@ class Obstacle:
             pass
         self.timing_UI.set_delay(self, delay)
         self.count_display.configure(text='Count #' + str(self.count))
-        try:
-            for item in self.walls[self.count]:
-                item[0].search_walls(self.count, self.num_counts)
-        except:
-            pass
+        for count in range(1, self.num_counts + 1):
+            try:
+                for item in self.walls[count]:
+                    item[0].search_walls(self.count, self.num_counts)
+            except:
+                pass
 
     def waits_to_frames(self):
         for n in self.timing.keys():
@@ -1177,38 +1428,66 @@ class Obstacle:
             frames = self.timing[n]
             self.timing[n] = 42*(frames - 1)
             
+    def to_json(self):
+        return {'num counts': self.num_counts, 'timing': self.timing}
+            
 def place_wall(event, ob, wall_menu, player, loc_dict):
-    n = loc_count
+    n = loc_count.num
     while n > 0:
         loc = loc_dict[n]
         if loc.highlighted:
             name = wall_menu.get()
             if name != '':
-                ob.walls[ob.count] = ob.walls.get(ob.count, []) + [(loc, 'c')]
-                wall = Wall(name, player.get())
-                loc.edit_wall(wall, ob.count, 'c')
+                flag = False
+                m = ob.count
+                while m > 0:
+                    try:
+                        if loc.walls[m][2] == 'c':
+                            flag = True
+                            break
+                        if loc.walls[m][2] == 'r':
+                            if m == ob.count:
+                                flag = True
+                            break
+                    except:
+                        pass
+                    m -= 1
+                    if m == 0:
+                        m = ob.num_counts
+                    if m == ob.count:
+                        break
+                if not flag:
+                    ob.walls[ob.count] = ob.walls.get(ob.count, []) + [(loc, 'c')]
+                    wall = Wall(name, player.get())
+                    loc.edit_wall(wall, ob.count, 'c')
             break
         else:
             n -= 1
                 
 def remove_wall(event, ob, loc_dict):
-    n = loc_count
+    n = len(loc_dict)
+    wall = 0
     while n > 0:
         loc = loc_dict[n]
         if loc.highlighted:
             flag = False
-            for i in range(1, ob.count):
-                try:
-                    for item in ob.walls[i]:
-                        L = item[0]
-                        if L == loc:
-                            if item[1] == 'c':
-                                wall = L.walls[i][0]
-                                flag = True
-                            else:
-                                flag = False
-                except:
-                    pass
+            if ob.count not in loc.walls.keys():
+                m = (ob.count - 1) % (ob.num_counts)
+                if m == 0:
+                    m = ob.num_counts
+                while m != ob.count:
+                    try:
+                        if loc.walls[m][2] == 'r':
+                            break
+                        if loc.walls[m][2] == 'c':
+                            wall = loc.walls[m][0]
+                            flag = True
+                            break
+                    except:
+                        pass
+                    m -= 1
+                    if m == 0:
+                        m = ob.num_counts
             if flag:
                 ob.walls[ob.count] = ob.walls.get(ob.count, []) + [(loc, 'r')]
                 loc.edit_wall(wall, ob.count, 'r')
@@ -1216,11 +1495,57 @@ def remove_wall(event, ob, loc_dict):
             break
         else:
             n -= 1
-
-def place_explosion(event, ob):
-    n = loc_count
+            
+def delete_wall(event, ob, loc_dict, canvas):
+    n = len(loc_dict)
     while n > 0:
-        loc = locations_numerical[n]
+        loc = loc_dict[n]
+        if loc.highlighted:
+            m = ob.count
+            while m > 0:
+                flag = False
+                try:
+                    if loc.walls[m][2] == 'c':
+                        flag = True
+                        break
+                    if loc.walls[m][2] == 'r':
+                        break
+                except:
+                    pass
+                m -= 1
+                if m == 0:
+                    m = ob.num_counts
+                if m == ob.count:
+                    break
+            if flag:
+                k = m
+                while k > 0:
+                    try:
+                        if loc.walls[k][2] == 'r':
+                            break
+                    except:
+                        pass
+                    k += 1
+                    if k == ob.num_counts + 1:
+                        k = 1
+                    if k == m:
+                        break
+                canvas.delete(loc.walls[m][1])
+                del loc.walls[m]
+                ob.walls[m].remove((loc, 'c'))
+                if k != m:
+                    del loc.walls[k]
+                    ob.walls[k].remove((loc, 'r'))
+                loc.search_walls(ob.count, ob.num_counts)
+            break
+        else:
+            n -= 1
+                
+
+def place_explosion(event, loc_dict, num_locs, ob):
+    n = num_locs.num
+    while n > 0:
+        loc = loc_dict[n]
         if loc.highlighted:
             for menu in explosion_menus:
                 name = menu.menu.get()
@@ -1235,7 +1560,6 @@ def place_explosion(event, ob):
                         for EXPLOSION in loc.explosions[ob.count]:
                             if EXPLOSION[0].name == explosion.name:
                                 flag = True
-                                print(2)
                     except:
                         pass
                     if not flag:
@@ -1253,10 +1577,10 @@ def place_explosion(event, ob):
         else:
             n -= 1
             
-def delete_explosion(event, ob):
-    n = loc_count
+def delete_explosion(event, loc_dict, num_locs, ob):
+    n = num_locs.num
     while n > 0:
-        loc = locations_numerical[n]
+        loc = loc_dict[n]
         if loc.highlighted:
             try:
                 loc.delete_explosion(ob.count)
@@ -1270,6 +1594,7 @@ def delete_explosion(event, ob):
 
 def hide_obstacle():
     display.itemconfigure('explosion', state='hidden')
+    display.itemconfigure('wall', state='hidden')
     
 def show_obstacle(canvas, ob):
     for loc in ob.locs[ob.count]:
@@ -1284,20 +1609,22 @@ selected_unit = {}
 image_index = 0
 
 
-class explosion_menu(ttk.LabelFrame):
+class explosion_menu(ttk.Frame):
     def choose():
         global selected_unit
         if self.selection.get() != '':
             selected_unit = self.prefix + self.selection.get()
         
-    def __init__(self, *args, options=[], prefix='', sprite=False, **kwargs):
+    def __init__(self, *args, options=[], prefix='', label='', sprite=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.options = options
         self.prefix = prefix
         self.sprite = sprite
         self.selection = StringVar()
+        self.text_label = ttk.Label(self, text=label)
+        self.text_label.grid(row=0, column=0)
         self.menu = acc(self, textvariable=self.selection, completevalues = self.options)
-        self.menu.grid(row=0, column=0)
+        self.menu.grid(row=0, column=1)
         
 def reset_unit_selections(variables):
     for var in variables:
@@ -1307,17 +1634,17 @@ def reset_unit_selections(variables):
 unit_selection = ttk.LabelFrame(explosion_selection, text='Units:')
 unit_selection.grid(row=0,column=0, sticky='N')
 
-terran_unit_selection = explosion_menu(unit_selection, options=terran_units, prefix='Terran ', text='Terran')
-terran_unit_selection.grid(row=0, column=0)
+terran_unit_selection = explosion_menu(unit_selection, options=terran_units, prefix='Terran ', label='Terran')
+terran_unit_selection.grid(row=0, column=0, sticky='E', pady=1)
 
-zerg_unit_selection = explosion_menu(unit_selection, options=zerg_units, prefix='Zerg ', text='Zerg')
-zerg_unit_selection.grid(row=1, column=0)
+zerg_unit_selection = explosion_menu(unit_selection, options=zerg_units, prefix='Zerg ', label='Zerg')
+zerg_unit_selection.grid(row=1, column=0, sticky='E', pady=1)
 
-protoss_unit_selection = explosion_menu(unit_selection, options=protoss_units, prefix='Protoss ', text='Protoss')
-protoss_unit_selection.grid(row=2, column=0)
+protoss_unit_selection = explosion_menu(unit_selection, options=protoss_units, prefix='Protoss ', label='Protoss')
+protoss_unit_selection.grid(row=2, column=0, sticky='E', pady=1)
 
-other_unit_selection = explosion_menu(unit_selection, options=other_units, text='Other')
-other_unit_selection.grid(row=3, column=0)
+other_unit_selection = explosion_menu(unit_selection, options=other_units, label='Other')
+other_unit_selection.grid(row=3, column=0, sticky='E', pady=1)
 
 
 def clear_unit_selection(changed_var, unit_variables):
@@ -1339,17 +1666,17 @@ for changed_var in unit_variables:
 sprite_selection = ttk.LabelFrame(explosion_selection, text='Sprites:')
 sprite_selection.grid(row=0, column=1)
 
-spell_sprite_selection = explosion_menu(sprite_selection, options=spell_sprites, sprite=True, text='Spells')
-spell_sprite_selection.grid(row=0, column=0)
+spell_sprite_selection = explosion_menu(sprite_selection, options=spell_sprites, sprite=True, label='Spells')
+spell_sprite_selection.grid(row=0, column=0, sticky='E', pady=1)
 
-attack_sprite_selection = explosion_menu(sprite_selection, options=attack_sprites, sprite=True, text='Attacks')
-attack_sprite_selection.grid(row=1, column=0)
+attack_sprite_selection = explosion_menu(sprite_selection, options=attack_sprites, sprite=True, label='Attacks')
+attack_sprite_selection.grid(row=1, column=0, sticky='E', pady=1)
 
-unit_sprite_selection = explosion_menu(sprite_selection, options=unit_sprites, sprite=True, text='Units')
-unit_sprite_selection.grid(row=2, column=0)
+unit_sprite_selection = explosion_menu(sprite_selection, options=unit_sprites, sprite=True, label='Units')
+unit_sprite_selection.grid(row=2, column=0, sticky='E', pady=1)
 
-other_sprite_selection = explosion_menu(sprite_selection, options=other_sprites, sprite=True, text='Other')
-other_sprite_selection.grid(row=3, column=0)
+other_sprite_selection = explosion_menu(sprite_selection, options=other_sprites, sprite=True, label='Other')
+other_sprite_selection.grid(row=3, column=0, sticky='E', pady=1)
 
 
 explosion_menus = [terran_unit_selection, zerg_unit_selection, protoss_unit_selection, other_unit_selection, spell_sprite_selection, attack_sprite_selection, unit_sprite_selection, other_sprite_selection]
@@ -1360,19 +1687,22 @@ def reset_selections(menus, i, j):
         menus[index].selection.set('')
 
 unit_reset_btn = ttk.Button(unit_selection, text='Reset', command=lambda: reset_selections(explosion_menus, 0, 3))
-unit_reset_btn.grid(row=4, column=0)
+unit_reset_btn.grid(row=4, column=0, sticky='E')
 
 sprite_reset_btn = ttk.Button(sprite_selection, text='Reset', command=lambda: reset_selections(explosion_menus, 4, 7))
-sprite_reset_btn.grid(row=4, column=0)
+sprite_reset_btn.grid(row=4, column=0, sticky='E')
 
 
-player_options = ttk.LabelFrame(explosion_selection, text='Player:')
-player_options.grid(row=1, column=0, columnspan=2, sticky='N')
+explosion_options = ttk.Frame(explosion_selection)
+explosion_options.grid(row=1, column=0, columnspan=2, pady=2, sticky='W')
+
+player_options_label = ttk.Label(explosion_options, text='Player:')
+player_options_label.grid(row=0, column=0)
 
 selected_player = StringVar()
-player_number_menu = acc_save(player_options, completevalues=players, textvariable=selected_player, tracevar=selected_player, settings='settings.txt', option='explosion_player')
+player_number_menu = acc_save(explosion_options, completevalues=players, textvariable=selected_player, tracevar=selected_player, settings='settings.txt', option='explosion_player')
 selected_player.trace('w', lambda *args, selected_player=selected_player: player_number_menu.save())
-player_number_menu.grid(row=0, column=0)
+player_number_menu.grid(row=0, column=1, padx=4)
 
 
 
@@ -1481,7 +1811,6 @@ class count_btn(hotkey_ttkBtn):
         self.config(command=self.press)
         self.loc_dict = loc_dict
         self.tooltip = tooltip(win, self, tooltip_text, (20, 10))
-        #window.bind(hotkey, self.press)
         
     def next_count(self):
         new_count = {'_': 1, '-': max(1, self.ob.count - 1), ']': self.ob.count, '=': self.ob.count + 1, '+': self.ob.num_counts, '[': max(1,min(self.ob.count, self.ob.num_counts - 1))}
@@ -1510,9 +1839,11 @@ class count_btn(hotkey_ttkBtn):
         elif self.hotkey == '[':
             self.ob.num_counts = max(1, self.ob.num_counts - 1)
         if flag:
-            self.delay = self.ob.timing[self.ob.count]
-        self.ob.show_count(self.delay)
-
+            self.ob.show_count(self.ob.timing[self.ob.count])
+        else:
+            self.ob.timing[self.ob.count] = self.delay.get()
+            self.ob.show_count(self.delay.get())
+            
 #takes a dictionary whose keys are integers and shifts the keys between (inclusive) "shift_point" and "max_point" up by 1, then assigns "value" to the key "shift_point"
 def dict_shift(dictionary, shift_point, max_point, value):
     i = max_point
@@ -1556,23 +1887,23 @@ count_display.grid(row=0, column=0, columnspan=5, sticky='N')
 
 OBSTACLE = Obstacle(display, count_display, timing_controls)
 
-first_count_btn = count_btn(count_controls, win=root, key='_', cb=None, ob=OBSTACLE, delay=timing_controls.delay.get(), loc_dict=locations_numerical, tooltip_text='First Count (_)', text='<<', width=3)
+first_count_btn = count_btn(count_controls, win=root, key='_', cb=None, ob=OBSTACLE, delay=timing_controls.delay, loc_dict=locations_numerical, tooltip_text='First Count (_)', text='<<', width=3)
 first_count_btn.cmd(first_count_btn.press)
 first_count_btn.grid(row=1, column=0)
 
-prev_count_btn = count_btn(count_controls, win=root, key='-', cb=None, ob=OBSTACLE, delay=timing_controls.delay.get(), loc_dict=locations_numerical, tooltip_text='Previous Count (-)', text='<', width=3)
+prev_count_btn = count_btn(count_controls, win=root, key='-', cb=None, ob=OBSTACLE, delay=timing_controls.delay, loc_dict=locations_numerical, tooltip_text='Previous Count (-)', text='<', width=3)
 prev_count_btn.cmd(prev_count_btn.press)
 prev_count_btn.grid(row=1, column=1)
 
-insert_count_btn = count_btn(count_controls, win=root, key=']', cb=None, ob=OBSTACLE, delay=timing_controls.delay.get(), loc_dict=locations_numerical, tooltip_text='Insert Count (])', text='*', width=2)
+insert_count_btn = count_btn(count_controls, win=root, key=']', cb=None, ob=OBSTACLE, delay=timing_controls.delay, loc_dict=locations_numerical, tooltip_text='Insert Count (])', text='*', width=2)
 insert_count_btn.cmd(insert_count_btn.press)
 insert_count_btn.grid(row=1, column=2)
 
-next_count_btn = count_btn(count_controls, win=root, key='=', cb=None, ob=OBSTACLE, delay=timing_controls.delay.get(), loc_dict=locations_numerical, tooltip_text='Next Count (=)', text='>', width=3)
+next_count_btn = count_btn(count_controls, win=root, key='=', cb=None, ob=OBSTACLE, delay=timing_controls.delay, loc_dict=locations_numerical, tooltip_text='Next Count (=)', text='>', width=3)
 next_count_btn.cmd(next_count_btn.press)
 next_count_btn.grid(row=1, column=3)
 
-last_count_btn = count_btn(count_controls, win=root, key='+', cb=None, ob=OBSTACLE, delay=timing_controls.delay.get(), loc_dict=locations_numerical, tooltip_text='Last Count (+)', text='>>', width=3)
+last_count_btn = count_btn(count_controls, win=root, key='+', cb=None, ob=OBSTACLE, delay=timing_controls.delay, loc_dict=locations_numerical, tooltip_text='Last Count (+)', text='>>', width=3)
 last_count_btn.cmd(last_count_btn.press)
 last_count_btn.grid(row=1, column=4)
 
@@ -1721,12 +2052,15 @@ def generate_triggers(text_display, obstacle, ob_number, trigger_player, force_n
         units = []
         sprites = []
         walls = []
-        for loc in obstacle.locs[n]:
-            for explosion in loc.explosions[n]:
-                if explosion[0].sprite:
-                    sprites.append((loc.label, explosion[0].name, explosion[0].player))
-                else:
-                    units.append((loc.label, explosion[0].name, explosion[0].player))
+        try:
+            for loc in obstacle.locs[n]:
+                for explosion in loc.explosions[n]:
+                    if explosion[0].sprite:
+                        sprites.append((loc.label, explosion[0].name, explosion[0].player))
+                    else:
+                        units.append((loc.label, explosion[0].name, explosion[0].player))
+        except:
+            pass
         try:
             for wall in obstacle.walls[n]:
                 name = wall[0].walls[n][0].name
