@@ -59,7 +59,7 @@ image_indices = {
     'Halo Rockets Trail': 960,
     'Subterranean Spines': 961,
     'Corrosive Acid Hit': 963,
-    'Neutron Flare': 964,
+    'Neutron Flare [!]': 964,
     'Mind Control Hit (Small)': 973,
     'Mind Control Hit (Medium)': 974,
     'Mind Control Hit (Large)': 975,
@@ -75,9 +75,11 @@ image_indices = {
 def deaths(player, unit, relation, number):
     return 'Deaths(\"' + player + '\", \"' + unit + '\", ' + relation + ', ' + str(number) + ');'
 
-
 def create_unit(player, unit, number, location):
     return 'Create Unit(\"' + player + '\", \"' + unit + '\", ' + str(number) + ', \"' + location + '\");'
+    
+def create_unit_prop(player, unit, number, location, prop):
+    return 'Create Unit with Properties(\"' + player + '\", \"' + unit + '\", ' + str(number) + ', \"' + location + '\", ' + str(prop) + ');'
     
 def kill_unit(player, unit):
     return 'Kill Unit(\"' + player + '\", \"' + unit + '\");'
@@ -97,8 +99,33 @@ def set_deaths(player, unit, operation, number):
 def wait(ms):
     return 'Wait(' + str(ms) + ');'
 
-def masked_memoryAddr(index):
-    return 'Masked MemoryAddr(0x00666458, Set To, ' + str(index) + ', 0x0000ffff);'
+def EUDaction(addr, operation, value, mask=''):
+    action = ''
+    if mask != '':
+        action += 'Masked '
+    action += 'MemoryAddr(' + addr + ', ' + operation + ', ' + str(value)
+    if mask!= '':
+        action += ', ' + mask
+    action += ');'
+    return action
+    
+def move_loc(ID, position_delta):
+    addrL = 5823584 + 20*(ID - 1);
+    loc_addrs = {"left": addrL, "right": addrL + 8, "bottom": addrL + 12, "top": addrL + 4};
+    actions = [];
+    if position_delta[0] < 0:
+        actions.append(EUDaction(str(hex(loc_addrs["left"])), 'Subtract', abs(position_delta[0])))
+        actions.append(EUDaction(str(hex(loc_addrs["right"])), 'Subtract', abs(position_delta[0])))
+    if position_delta[0] > 0:
+        actions.append(EUDaction(str(hex(loc_addrs["left"])), 'Add', abs(position_delta[0])))
+        actions.append(EUDaction(str(hex(loc_addrs["right"])), 'Add', abs(position_delta[0])))
+    if position_delta[1] < 0:
+        actions.append(EUDaction(str(hex(loc_addrs["top"])), 'Subtract', abs(position_delta[1])))
+        actions.append(EUDaction(str(hex(loc_addrs["bottom"])), 'Subtract', abs(position_delta[1])))
+    if position_delta[1] > 0:
+        actions.append(EUDaction(str(hex(loc_addrs["top"])), 'Add', abs(position_delta[1])))
+        actions.append(EUDaction(str(hex(loc_addrs["bottom"])), 'Add', abs(position_delta[1])))
+    return actions;
 
 def add_comment(ob_num, count_num, part_num, multipart, options):
     comment = 'Comment(\"'
@@ -128,8 +155,8 @@ def add_comment(ob_num, count_num, part_num, multipart, options):
     comment += '\");\n'
     
     return comment
-#explosion = [loc, name, player]
-def count_triggers(ob_num=1, count_num=1, last_count=False, trig_owner='', force='', death_counters = [], death_type='', comment_options=[], timing_type='', unit_explosions=[], sprite_explosions = [], wall_actions=[], delay=1):
+
+def count_triggers(ob_num=1, count_num=1, last_count=False, locations_used=[], recycle_locations_list=[], recycle_explosions_list={}, trig_owner='', force='', death_counters = [], death_type='', comment_options=[], timing_type='', unit_explosions=[], sprite_explosions = [], use_sound_flag = 1, sound_effects = [], wall_actions=[], delay=1):
     triggers = []
     conditions = []
     actions = []
@@ -139,48 +166,76 @@ def count_triggers(ob_num=1, count_num=1, last_count=False, trig_owner='', force
     conditions.append(deaths(death_counters[3], death_counters[2], 'Exactly', 0))
  
     sprites_used = False
-    explosions_by_sprite = {}
-    explosions_by_unit = {}
     units_used = {}
-    locations = []
+    
+    if use_sound_flag == 1:
+        for unit in sound_effects:
+            actions.append(set_deaths(force, unit, 'Set to', 1))
     
     for wall in wall_actions:
         if wall[3] == 'c':
-            actions.append(create_unit(wall[2], wall[0], 1, wall[1]))
+            actions.append(create_unit_prop(wall[2], wall[0], 1, wall[1], 2))
         if wall[3] == 'r':
             actions.append(remove_unit_at_location('All Players', wall[0], 'All', wall[1]))
-
-    for explosion in sprite_explosions:
-        name = explosion[1]
-        explosions_by_sprite[name] = explosions_by_sprite.get(name, []) + [explosion]
-        locations.append(explosion[0])
-    for explosion in unit_explosions:
-        name = explosion[1]
-        explosions_by_unit[name] = explosions_by_unit.get(name, []) + [explosion]
-        locations.append(explosion[0])
-        units_used[name] = units_used.get(name, []) + [explosion[2]]
-
-    for name in explosions_by_sprite.keys():
-        actions.append(masked_memoryAddr(image_indices[name]))
-        for explosion in explosions_by_sprite[name]:
-            actions.append(create_unit(explosion[2], 'Scanner Sweep', 1, explosion[0]))
+    
+    sprite_flag = False
+    sprite_name = ''
+    for explosion in sorted(sprite_explosions, key=lambda k: k[1]):
+        if explosion[1] != sprite_name:
+            sprite_name =  explosion[1]
+            actions.append(EUDaction('0x00666458', 'Set To', image_indices[sprite_name], mask='0x0000ffff'))
+        actions.append(create_unit(explosion[2], 'Scanner Sweep', 1, explosion[0]))
     if len(sprite_explosions) > 0:
-        actions.append(remove_unit('All Players', 'Scanner Sweep'))
+        sprite_flag = True
         
-    for name in explosions_by_unit.keys():
-        for explosion in explosions_by_unit[name]:
-            actions.append(create_unit(explosion[2], explosion[1], 1, explosion[0]))
-            
-    if death_type == 'remove':
-        for unit in units_used:
-            for player in set(units_used[unit]):
-                actions.append(kill_unit(player, unit))
+    for explosion in sorted(unit_explosions, key=lambda k: k[1]):
+        actions.append(create_unit(explosion[2], explosion[1], 1, explosion[0]))
+        units_used[explosion[1]] = units_used.get(explosion[1], []) + [explosion[2]]
         
-    for loc in set(locations):
+    for loc in locations_used:
         if death_type == 'kill':
             actions.append(kill_unit_at_location('All players', 'Men', 'All', loc))
         if death_type == 'remove':
             actions.append(remove_unit_at_location('All players', 'Zerg Zergling', 'All', loc))
+        
+    for loc in recycle_locations_list:
+        ID = recycle_explosions_list[loc]['ID']
+        coord = recycle_explosions_list[loc]['start']
+        for item in recycle_explosions_list[loc]['explosions']:
+            pos_change = (item[0][0] - coord[0], item[0][1] - coord[1])
+            if pos_change != (0,0):
+                for action in move_loc(ID, pos_change):
+                    actions.append(action)
+            try:
+                explosion = item[1]
+                if explosion[2]:
+                    sprite_flag = True
+                    actions.append(EUDaction('0x00666458', 'Set To', image_indices[explosion[0]], mask='0x0000ffff'))
+                    actions.append(create_unit(explosion[1], 'Scanner Sweep', 1, loc))
+                else:
+                    actions.append(create_unit(explosion[1], explosion[0], 1, loc))
+                    units_used[explosion[0]] = units_used.get(explosion[0], []) + [explosion[1]]
+                if death_type == 'kill':
+                    actions.append(kill_unit_at_location('All players', 'Men', 'All', loc))
+                else:
+                    actions.append(remove_unit_at_location('All players', 'Zerg Zergling', 'All', loc))
+            except:
+                pass
+            coord = item[0]
+        x = recycle_explosions_list[loc]['start'][0]
+        y = recycle_explosions_list[loc]['start'][1]
+        pos_change = (x - coord[0], y - coord[1])
+        if pos_change != 0:
+            for action in move_loc(ID, pos_change):
+                actions.append(action)
+            
+    if death_type == 'remove':
+        for unit in sorted(units_used.keys()):
+            for player in sorted(set(units_used[unit])):
+                actions.append(kill_unit(player, unit))
+                
+    if sprite_flag > 0:            
+        actions.append(remove_unit('All Players', 'Scanner Sweep'))
     
     if last_count:
         operation = 'Set To'
@@ -198,21 +253,28 @@ def count_triggers(ob_num=1, count_num=1, last_count=False, trig_owner='', force
     trigger_start += '\n' + 'Actions:\n'
     
     num_actions = len(actions)
-    num_parts = math.ceil(num_actions/62)
+    part_num = 1
     triggers = []
     i = 0
-    while i < num_parts:
+    j = 0
+    while i < num_actions:
+        flag = False
         trigger = trigger_start
-        if num_parts - i == 1:
-            end_index = num_actions
-        else:
-            end_index = 62*(i + 1)
-        for j in range(62*i, end_index):
-            trigger += actions[j] + '\n'
+        j = 0
+        while j < 62:
+            try:
+                trigger += actions[i] + '\n'
+                i += 1
+                j += 1
+            except:
+                flag = True
+                break
         trigger += 'Preserve Trigger();' + '\n'
-        trigger += add_comment(ob_num, count_num, i+1, num_parts > 1, comment_options)
+        trigger += add_comment(ob_num, count_num, part_num, num_actions > 62, comment_options)
         trigger += '}\n\n' + '//-----------------------------------------------------------------//\n'
-        triggers.append(trigger)
-        i += 1
+        triggers.append(trigger + '\n')
+        part_num += 1
+        if flag:
+            break
         
     return triggers

@@ -1,5 +1,5 @@
 explosion_player=Current Player
-wall_player=Current Player
+wall_player=Player 8
 ob_DC=Overmind Cocoon
 count_DC=Cantina
 frame_DC=Data Disc

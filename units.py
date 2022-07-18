@@ -78,7 +78,8 @@ wall_units = [
     'Psi Emitter',
     'Uraj Crystal',
     'Young Chrysalis',
-    'Terran Machine Shop'
+    'Terran Machine Shop',
+    'Vespene Orb (Protoss Type 1)'
 ]
 #////////////////////////////////////////////////////////////////
 
@@ -115,7 +116,7 @@ attack_sprites = [
     'Grenade Shot Smoke',
     'Halo Rockets Trail',
     'Needle Spines',
-    'Neutron Flare',
+    'Neutron Flare [!]',
     'Phase Disruptor',
     'Phase Disruptor Hit',
     'Psionic Shockwave Hit',

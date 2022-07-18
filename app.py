@@ -14,6 +14,7 @@ from PIL import Image, ImageTk
 #the main window
 root = tk.Tk()
 root.title('Obstacle Studio')
+root.geometry('2000x1000')
 root.columnconfigure(0, weight=1)
 root.rowconfigure(0, weight=1)
 
@@ -29,10 +30,11 @@ def new_file(main_window, canvas, terrain_dict, loc_dict, num_locs, ob, current_
     canvas.clear()
     ob.count = 1
     ob.num_counts = 1
-    ob.locs = {1:[]}
     ob.timing = {1:1}
-    ob.show_count(1)
+    ob.explosions = {1: {}}
+    ob.recycle_explosions = {1: {}}
     ob.walls.clear()
+    ob.show_count(1)
     terrain_dict.clear()
     loc_dict.clear()
     num_locs.replace(0)
@@ -44,9 +46,7 @@ def open_file(main_window, canvas, terrain_dict, tile_dict, loc_dict, num_locs, 
         str_dict = file.read()
         JSON_dict = json.loads(str_dict)
         canvas.clear()
-        
         ob_num.set(JSON_dict['ob_num'])
-        ob.locs.clear()
         ob.timing.clear()
         ob.count = 1
         
@@ -68,39 +68,14 @@ def open_file(main_window, canvas, terrain_dict, tile_dict, loc_dict, num_locs, 
             width = int(loc_data['width'])
             height = int(loc_data['height'])
             loc = Location((x,y), (width, height), number)
+            loc.ID = int(loc_data['ID'])
             loc.highlighted = True
             loc.unmouseover()
             loc.highlighted = False
             loc_dict[number] = loc
-            
-            explosions = loc_data['explosions']
-            for c in explosions.keys():
-                count = int(c)
-                flag = False
-                try:
-                    if loc in ob.locs[count]:
-                        flag = True
-                except:
-                    pass
-                if not flag:
-                    ob.locs[count] = ob.locs.get(count, []) + [loc]
-                
-                for item in explosions[c]:
-                    name = item['name']
-                    player = item['player']
-                    sprite = bool(item['sprite'])
-                    explosion = Explosion(name, player, sprite)
-                    loc.place_explosion(explosion, count)
-                
-            walls = loc_data['walls']
-            for c in walls.keys():
-                count = int(c)
-                triple = tuple(walls[c])
-                ob.walls[count] = ob.walls.get(count, []) + [(loc, triple[2])]
-                wall = Wall(triple[0], triple[1])
-                loc.edit_wall(wall, count, triple[2])
-                
         num_locs.replace(int(JSON_dict['num locs']))
+        for n in range(1, len(loc_dict) + 1):
+            loc_dict[n].write_name(len(loc_dict))
         
         JSON_ob_dict = json.loads(JSON_dict['obstacle'])
         ob.num_counts = int(JSON_ob_dict['num counts'])
@@ -108,17 +83,69 @@ def open_file(main_window, canvas, terrain_dict, tile_dict, loc_dict, num_locs, 
         for c in timing.keys():
             count = int(c)
             ob.timing[count] = int(timing[c])
+            
+        explosions = JSON_ob_dict['explosions']
+        for c in explosions.keys():
+            count = int(c)
+            ob.explosions[count] = ob.explosions.get(count, {})
+            for l in explosions[c].keys():
+                loc = loc_dict[int(l)]
+                for item in explosions[c][l]:
+                    name = item[0]
+                    player = item[1]
+                    sprite = item[2]
+                    explosion = Explosion(name, player, sprite)
+                    ob.explosions[count][loc] = ob.explosions[count].get(loc, []) + [(explosion, canvas.create_image(loc.x + 16*loc.width, loc.y + 16*loc.height, anchor='center', tag='explosion', image=explosion.img))]
+            ob.hide_count()
+            ob.count += 1
+            
+        ob.count = 1
+        recycle_explosions = JSON_ob_dict['recycle_explosions']
+        for c in recycle_explosions.keys():
+            count = int(c)
+            ob.recycle_explosions[count] = ob.recycle_explosions.get(count, {})
+            for l in recycle_explosions[c].keys():
+                loc = loc_dict[int(l)]
+                for coord in recycle_explosions[c][l].keys():
+                    ob.recycle_explosions[count][loc] = ob.recycle_explosions[count].get(loc, {})
+                    for item in recycle_explosions[c][l][coord]:
+                        name = item[0]
+                        player = item[1]
+                        sprite = item[2]
+                        explosion = Explosion(name, player, sprite)
+                        x = int(coord.split('_')[0])
+                        y = int(coord.split('_')[1])
+                        ob.recycle_explosions[count][loc][(x,y)] = ob.recycle_explosions[count][loc].get((x,y), []) + [(explosion, canvas.create_image(x + 16*loc.width, y + 16*loc.height, anchor='center', tag='explosion', image=explosion.img))]
+            ob.hide_count()
+            ob.count += 1
+         
+        ob.count = 1
+        walls = JSON_ob_dict['walls']
+        for c in walls.keys():
+            count = int(c)
+            ob.walls[count] = ob.walls.get(count, {})
+            for l in walls[c].keys():
+                loc = loc_dict[int(l)]
+                item = walls[c][l]
+                action = item[0]
+                name = item[1]
+                player = item[2]
+                wall = Wall(name, player)
+                if action == 'c':
+                    value = ('c', wall, canvas.create_image(loc.x + 16*loc.width, loc.y + 16*loc.height, anchor='center', tag='wall', image=wall.img))
+                if action == 'r':
+                    value = ('r', wall)
+                ob.walls[count][loc] = value
+            ob.hide_count()
+            ob.count += 1
+            
+        ob.count = 1
+        if tool.num == 3:
+            ob.show_count(ob.timing[1])
 
         canvas.rename_locations(num_locs, loc_dict) 
         canvas.organize_layers()
         canvas.load(tool.num)
-        if tool.num == 3:
-            ob.show_count(str(ob.timing[1]))
-            try:
-                for item in ob.walls[1]:
-                    item[0].search_walls(1, ob.num_counts)
-            except:
-                pass
         
 current_save_file = StringVar()
 current_save_file.set('')
@@ -158,9 +185,9 @@ def save_as(main_window, canvas, terrain_dict, loc_dic, num_locs, ob, ob_num, cu
         file.write(json.dumps(dictionary))
         file.close()
 
-root.bind('<Control-KeyPress-N>', lambda event: new_file(root, display, terrain_tiles, locations_numerical, loc_count, OBSTACLE, current_save_file, event))
-root.bind('<Control-KeyPress-O>', lambda event: open_file(root, display, terrain_tiles, tileimages, locations_numerical, loc_count, OBSTACLE, ob_number, selected_tool, event))
-root.bind('<Control-KeyPress-S>', lambda event: save(root, display, terrain_tiles, locations_numerical, loc_count, OBSTACLE, ob_number, current_save_file, event))
+root.bind('<Control-Key-n>', lambda event: new_file(root, display, terrain_tiles, locations_numerical, loc_count, OBSTACLE, current_save_file, event))
+root.bind('<Control-Key-o>', lambda event: open_file(root, display, terrain_tiles, tileimages, locations_numerical, loc_count, OBSTACLE, ob_number, selected_tool, event))
+root.bind('<Control-Key-s>', lambda event: save(root, display, terrain_tiles, locations_numerical, loc_count, OBSTACLE, ob_number, current_save_file, event))
 root.bind('<Control-Shift-KeyPress-S>', lambda event: save_as(root, display, terrain_tiles, locations_numerical, loc_count, OBSTACLE, ob_number, current_save_file, event))
 
 file_menu = Menu(menubar, tearoff=False)
@@ -364,9 +391,19 @@ buttonStyle.map('Highlight.TButton')
 class ob_canvas(tk.Canvas):
     def __init__(self, blank, *args, **kwargs):
         tk.Canvas.__init__(self, *args, **kwargs)
+        self.loc_in_recycle = None
+        self.loc_recycling = BooleanVar()
+        self.loc_recycling.set(False)
+        self.gridsize = 32
         self.blank = blank
         self.layers = ('terrain', 'location', 'wall', 'explosion', 'highlight', 'grid', 'locationMouseover', 'locationExtras')
         self.create_layers(self.layers)
+        self.highlight_resizes = {}
+        for width in range(1,20):
+            for height in range(1,20):
+                highlight_tile = Image.open('./Images/Misc/gridhighlight.png')
+                highlight_tile_resized = highlight_tile.resize((32*width,32*height), Image.ANTIALIAS)
+                self.highlight_resizes[(width, height)] = ImageTk.PhotoImage(highlight_tile_resized)
         
     def create_layers(self, layers):
         for layer in layers:
@@ -376,6 +413,9 @@ class ob_canvas(tk.Canvas):
         
     #a new object placed on the canvas will appear at the top layer by default, so the layers need to be reorderable
     def organize_layers(self):
+        for layer in self.layers:
+            if len(self.find_withtag(layer)) == 0:
+                self.create_image(0, 0, anchor='nw', tag=layer, image=self.blank)
         self.tag_raise('locationExtras')
         self.tag_lower('grid', 'locationExtras')
         self.tag_lower('locationMouseover', 'grid')
@@ -402,6 +442,94 @@ class ob_canvas(tk.Canvas):
     def rename_locations(self, num_locs, loc_dict):
         for i in range(1, num_locs.num + 1):
             loc_dict[i].write_name(num_locs)
+            
+    def snap(self, d, width, height):
+        def rounding(p, parity):
+            q = round(p/d)*d
+            if parity == 1 and d == 32:
+                if abs(p - (q - 16)) <= abs(p - (q + 16)):
+                    q -= 16
+                else:
+                    q += 16
+            return q
+        x = rounding(self.winfo_pointerx() - self.winfo_rootx(), width % 2)
+        y = rounding(self.winfo_pointery() - self.winfo_rooty(), height % 2)
+        return (x - 16*width, y - 16*height)
+        
+    def draw_grid(self, d):
+        self.delete('grid')
+        width = self.winfo_width()
+        height = self.winfo_height()
+
+        #draw vertical lines
+        for i in range(d, width, d):
+            L = self.create_line([(i, 0), (i, height)], tag='grid', fill='#808080')
+
+        #draw horizontal lines
+        for i in range(d, height, d):
+            L = self.create_line([(0, i), (width, i)], tag='grid', fill='#808080')
+            
+        self.organize_layers()
+    
+    def resize_grid(self, d):
+        #self.draw_grid(d)
+        self.gridsize = d
+        
+    def highlight_location(self, tool, loc_dict):
+        num = -1
+        for n in range(1, len(loc_dict) + 1):
+            loc = loc_dict[n]
+            try:
+                if loc.motion or loc.resizing[0] or loc.resizing[1]:
+                    num = loc.number
+                else:
+                    loc.unmouseover()
+            except:
+                pass
+        if num == -1:
+            flag = False
+            for n in reversed(range(1, len(loc_dict) + 1)):
+                loc = loc_dict[n]
+                if loc.mouseover()[0] > 0 and loc.mouseover()[1] > 0:
+                    flag = True
+                    loc.mouseover_highlight()
+                    if loc.mouseover()[0] > 1 and loc.mouseover()[1] > 1:
+                        if tool.num == 2:
+                            self.config(cursor='fleur')
+                    elif loc.mouseover()[0] > 1 and loc.mouseover()[1] == 1:
+                        if tool.num == 2:
+                            self.config(cursor='sb_h_double_arrow')
+                    elif loc.mouseover()[0] == 1 and loc.mouseover()[1] > 1:
+                        if tool.num == 2:
+                            self.config(cursor='sb_v_double_arrow')
+                    else:
+                        if tool.num == 2:
+                            self.config(cursor='hand2')
+                    break
+            if not flag:
+                self.config(cursor='arrow')
+            
+    def mouse_highlight(self, tool, d, w, h, loc_dict, event):
+        if tool.num < 3:
+            self.delete('highlight')
+            x = self.snap(d, w, h)[0]
+            y = self.snap(d, w, h)[1]
+            self.create_image(x, y, anchor = 'nw', tag='highlight', image=self.highlight_resizes[(w, h)])
+        if tool.num > 1:
+            self.highlight_location(tool, loc_dict)
+        
+    def recycle_loc(self, tool, ob, loc_dict, gridsize, event):
+        if self.loc_recycling:
+            n = len(loc_dict)
+            while n > 0:
+                loc = loc_dict[n]
+                if loc.highlighted:
+                    self.loc_in_recycle = loc
+                    self.bind('<Motion>', lambda event: self.mouse_highlight(tool, self.gridsize, loc.width, loc.height, loc_dict, event))
+                    break
+                else:
+                    n -= 1
+                    
         
 #the display on which terrain, locations, and explosions can be placed
 display = ob_canvas(transparent_pixel, Editor, bg="black")
@@ -475,6 +603,7 @@ def highlight_atCursor(d, w, h, tool, event):
     if tool > 1:
         highlight_location(locations_numerical, loc_count)
     display.organize_layers()
+   
 
 #container widget which holds the widgets used to edit obstacles
 editor_controls = ttk.Frame(Editor, style='gray.TFrame')
@@ -529,9 +658,9 @@ def press_Terrain_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_b
     canvas.bind('<Button-' + right_mouse + '>', lambda event: delete_terrain(canvas, w, h, event))
     canvas.bind('<B' + right_mouse + '-Motion>', lambda event: delete_terrain(canvas, w, h, event))
     canvas.unbind('<ButtonRelease-1>')
-    canvas.unbind('<KeyRelease-w>')
-    canvas.unbind('<KeyRelease-r>')
-    canvas.unbind('<KeyRelease-d>')
+    canvas.unbind('<Key-w>')
+    canvas.unbind('<Key-r>')
+    canvas.unbind('<Key-d>')
     hide_locations(loc_dictionary)
     hide_obstacle()
     arrange_UIs(thisUI, otherUIs)
@@ -555,9 +684,9 @@ def press_Location_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_
     canvas.bind('<B1-Motion>', lambda event: move_location(d, w, h, loc_dictionary, event))
     canvas.unbind('<B' + right_mouse + '-Motion>')
     canvas.unbind('<Button-1>')
-    canvas.unbind('<KeyRelease-w>')
-    canvas.unbind('<KeyRelease-r>')
-    canvas.unbind('<KeyRelease-d>')
+    canvas.unbind('<Key-w>')
+    canvas.unbind('<Key-r>')
+    canvas.unbind('<Key-d>')
     show_locations(loc_dictionary)
     hide_obstacle()
     arrange_UIs(thisUI, otherUIs)
@@ -567,8 +696,7 @@ def press_Location_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_
         btn.config(state='normal')
     mode_btn.config(state='disabled')
 
-
-def press_Obstacle_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_btn, other_mode_btns, canvas, tool, d, w, h, loc_dictionary, num_locs, ob, count_display, wall_menu, wall_player, OS, event=None):
+def press_Obstacle_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_btn, other_mode_btns, main_window, canvas, tool, d, w, h, loc_dictionary, num_locs, loc_ID_dict, ob, count_display, expl_menus, expl_player, wall_menu, wall_player, OS, event=None):
     if OS == 'Darwin':
         right_mouse = '2'
     else:
@@ -577,11 +705,12 @@ def press_Obstacle_btn(thisUI, otherUIs, hotkey_widgets, unhotkey_widgets, mode_
     canvas.delete('highlight')
     recreate_layer('highlight')
     canvas.bind('<Motion>', lambda event: highlight_atCursor(d, w, h, 3, event))
-    canvas.bind('<Button-1>', lambda event: place_explosion(event, loc_dictionary, num_locs, ob))
-    canvas.bind('<Button-' + right_mouse + '>', lambda event: delete_explosion(event, loc_dictionary, num_locs, ob))
-    canvas.bind('<KeyRelease-w>', lambda event: place_wall(event, ob, wall_menu, wall_player, loc_dictionary))
-    canvas.bind('<KeyRelease-r>', lambda event: remove_wall(event, ob, loc_dictionary))
-    canvas.bind('<KeyRelease-d>', lambda event: delete_wall(event, ob, loc_dictionary, canvas))
+    canvas.bind('<Button-1>', lambda event: ob.place_explosion(event, canvas, loc_dictionary, expl_menus, expl_player))
+    canvas.bind('<Button-' + right_mouse + '>', lambda event: ob.delete_explosion(event, loc_dictionary))
+    canvas.bind('<Key-w>', lambda event: ob.place_wall(event, wall_menu, wall_player, loc_dictionary))
+    canvas.bind('<Key-r>', lambda event: ob.remove_wall(event, loc_dictionary))
+    canvas.bind('<Key-d>', lambda event: ob.delete_wall(event, loc_dictionary))
+    canvas.bind('<Key-i>', lambda event: set_loc_ID(event, main_window, loc_ID_dict, loc_dictionary))
     canvas.unbind('<ButtonRelease-1>')
     canvas.unbind('<B1-Motion>')
     canvas.unbind('<B' + right_mouse + '-Motion>')
@@ -611,8 +740,11 @@ Location_btn.keybind()
 Location_btn_tip = tooltip(root, Location_btn, '(Alt+L)', (20,10))
 Location_btn.grid(row=1, column=0)
 
-Obstacle_btn.config(command=lambda: press_Obstacle_btn(Obstacle_UI, [Terrain_UI, Location_UI], Obstacle_hotkeys, [Terrain_hotkeys, Location_hotkeys], Obstacle_btn, [Location_btn, Terrain_btn], display, selected_tool, gridsize, W, H, locations_numerical, loc_count, OBSTACLE, count_display, wall_units_menu, selected_wall_player, operating_system))
-Obstacle_btn.cmd(lambda event: press_Obstacle_btn(Obstacle_UI, [Terrain_UI, Location_UI], Obstacle_hotkeys, [Terrain_hotkeys, Location_hotkeys], Obstacle_btn, [Location_btn, Terrain_btn], display, selected_tool, gridsize, W, H, locations_numerical, loc_count, OBSTACLE, count_display, wall_units_menu, selected_wall_player, operating_system, event))
+Obstacle_btn.config(command=lambda: press_Obstacle_btn(Obstacle_UI, [Terrain_UI, Location_UI], Obstacle_hotkeys, [Terrain_hotkeys, Location_hotkeys], Obstacle_btn, [Location_btn, Terrain_btn],
+    root, display, selected_tool, gridsize, W, H,
+    locations_numerical, loc_count, loc_ID_windows,
+    OBSTACLE, count_display, explosion_menus, selected_player, wall_units_menu, selected_wall_player, operating_system))
+Obstacle_btn.cmd(lambda event: press_Obstacle_btn(Obstacle_UI, [Terrain_UI, Location_UI], Obstacle_hotkeys, [Terrain_hotkeys, Location_hotkeys], Obstacle_btn, [Location_btn, Terrain_btn], root, display, selected_tool, gridsize, W, H, locations_numerical, loc_count, loc_ID_windows, OBSTACLE, count_display, explosion_menus, selected_player, wall_units_menu, selected_wall_player, operating_system, event))
 Obstacle_btn.keybind()
 Obstacle_btn_tip = tooltip(root, Obstacle_btn, '(Alt+O)', (20,10))
 Obstacle_btn.grid(row=2, column=0)
@@ -948,9 +1080,12 @@ class Location:
         self.resizing = [False, False]
         
         self.explosions = {}
+        self.recycle_explosions = {}
         self.walls = {}
         
         self.draw_borders()
+        
+        self.ID = 0
         
     def draw_borders(self):
         for border in self.borders:
@@ -1055,9 +1190,6 @@ class Location:
             x = snap(d, self.width, self.height)[0]
             y = snap(d, self.width, self.height)[1]
             self.motion = True
-            for count in self.explosions.keys():
-                for explosion in self.explosions[count]:
-                    display.coords(explosion[1], x + 16*self.width, y + 16*self.width)
             self.x = x
             self.y = y
             self.topleft_corner = (x,y)
@@ -1080,7 +1212,6 @@ class Location:
                     self.width = int(max(1, abs(self.x - x)/32))
                     
             if self.resizing[1]:
-                print(2)
                 if y < self.center[1]:
                     self.height += int((self.y - y)/32)
                     self.y = y
@@ -1090,6 +1221,14 @@ class Location:
         self.topleft_corner = (self.x, self.y)
         self.dim = (self.width, self.height)
         
+        for count in self.explosions.keys():
+            for explosion in self.explosions[count]:
+                display.coords(explosion[1], self.x + 16*self.width, self.y + 16*self.height)
+        for count in self.walls.keys():
+            try:
+                display.coords(self.walls[count][1], self.x + 16*self.width, self.y + 16*self.height)
+            except:
+                pass
 
         display.delete('highlight')
         display.delete(self.mouseover_overlay)
@@ -1098,65 +1237,12 @@ class Location:
         self.draw_borders()
         recreate_layer('highlight')
         display.organize_layers()
-            
-    def place_explosion(self, explosion, count):
-        self.explosions[count] = self.explosions.get(count, []) + [(explosion, display.create_image(self.x + 16*self.width, self.y + 16*self.height, anchor='center', tag='explosion', image=explosion.img))]
-        display.organize_layers()
-        
-    def delete_explosion(self, count):
-        display.delete(self.explosions[count][-1][1])
-        self.explosions[count].pop(-1)
-        if self.explosions[count] == []:
-            del self.explosions[count]
-            
-    def edit_wall(self, wall, count, action):
-        if action == 'c':
-            img = display.create_image(self.x + 16*self.width, self.y + 16*self.height, anchor='center', tag='wall', image=wall.img)
-        if action == 'r':
-            img = 0
-        self.walls[count] = (wall, img, action)
-        display.organize_layers()
-            
-    def search_walls(self, count, num_counts):
-        wall_count = 0
-        i = count
-        while i > 0:
-            try:
-                if self.walls[i][2] == 'c':
-                    display.itemconfigure(self.walls[i][1], state='normal')
-                    wall_count = i
-                    break
-            except:
-                pass
-            i -= 1
-            if i == 0:
-                i = num_counts
-            if i == count:
-                break
-        if wall_count != count and wall_count > 0:
-            j = count
-            while j > 0:
-                try:
-                    if self.walls[j][2] == 'r':
-                        display.itemconfigure(self.walls[wall_count][1], state='hidden')
-                        break
-                except:
-                    pass
-                j -= 1
-                if j == 0:
-                    j = num_counts
-                if j == wall_count:
-                    break
+                    
+    def set_ID(self, ID):
+        self.ID = ID
                     
     def to_json(self):
-        explosions = {}
-        for count in self.explosions.keys():
-            for explosion in self.explosions[count]:
-                explosions[count] = explosions.get(count, []) + [explosion[0]]
-        walls = {}
-        for count in self.walls.keys():
-            walls[count] = (self.walls[count][0].name, self.walls[count][0].player, self.walls[count][2])
-        return {'number': self.number, 'x': self.x, 'y': self.y, 'width': self.width, 'height': self.height, 'explosions': explosions, 'walls': walls}
+        return {'number': self.number, 'x': self.x, 'y': self.y, 'width': self.width, 'height': self.height, 'ID': self.ID}
             
 def move_location(d, w, h, loc_dictionary, event):
     highlight_atCursor(d, w, h, 2, event=None)
@@ -1336,7 +1422,7 @@ for i in range(1,9):
     players.append('Player ' + str(i))
 
 wall_controls = ttk.LabelFrame(toolkit, text='Walls:')
-wall_controls.grid(row=0, column=0, sticky='N')
+wall_controls.grid(row=0, column=1, sticky='N')
 wall_units_label = ttk.LabelFrame(wall_controls, text='Units:')
 wall_units_label.grid(row=0, column=0, columnspan=2)
 wall_units_menu = acc(wall_units_label, completevalues=wall_units)
@@ -1377,36 +1463,111 @@ class Explosion:
         
 class Obstacle:
     def __init__(self, canvas, count_display, timing_UI):
-        self.walls = {}
-        self.locs = {1: []}
-        self.timing = {1: 1}
-        self.num_counts = 1
         self.count = 1
+        self.num_counts = 1
+        self.timing = {1: 1}
+        self.explosions = {1: {}}
+        self.recycle_explosions = {}
+        self.walls = {}
+        
         self.canvas = canvas
         self.count_display = count_display
         self.timing_UI = timing_UI
-       
+
     def hide_count(self):
         try:
-            for loc in self.locs[self.count]:
-                for explosion in loc.explosions[self.count]:
-                    display.itemconfigure(explosion[1], state='hidden')
+            for loc in self.explosions[self.count].keys():
+                for explosion in self.explosions[self.count][loc]:
+                    self.canvas.itemconfigure(explosion[1], state='hidden')
         except:
             pass
+        try:
+            for loc in self.recycle_explosions[self.count].keys():
+                for coord in self.recycle_explosions[self.count][loc].keys():
+                    for explosion in self.recycle_explosions[self.count][loc][coord]:
+                        self.canvas.itemconfigure(explosion[1], state='hidden')
+        except:
+            pass
+        wall_count = 0
+        i = self.count
+        while i > 0:
+            try:
+                for loc in self.walls[i].keys():
+                    if self.walls[i][loc][0] == 'c':
+                        self.canvas.itemconfigure(self.walls[i][loc][2], state='hidden')
+                        wall_count = i
+                        break
+            except:
+                pass
+            i -= 1
+            if i == 0:
+                i = self.num_counts
+            if i == self.count:
+                break
+        if wall_count != self.count and wall_count > 0:
+            j = self.count
+            while j > 0:
+                try:
+                    for loc in self.walls[j].keys():
+                        if self.walls[j][loc][0] == 'r':
+                            display.itemconfigure(self.walls[wall_count][loc][2], state='hidden')
+                            break
+                except:
+                    pass
+                j -= 1
+                if j == 0:
+                    j = self.num_counts
+                if j == wall_count:
+                    break
         
     def show_count(self, delay):
         try:
-            for loc in self.locs[self.count]:
-                for explosion in loc.explosions[self.count]:
+            for loc in self.explosions[self.count].keys():
+                for explosion in self.explosions[self.count][loc]:
                     self.canvas.itemconfigure(explosion[1], state='normal')
+        except:
+            pass
+        try:
+            for loc in self.recycle_explosions[self.count].keys():
+                for coord in self.recycle_explosions[self.count][loc].keys():
+                    for explosion in self.recycle_explosions[self.count][loc][coord]:
+                        self.canvas.itemconfigure(explosion[1], state='normal')
         except:
             pass
         self.timing_UI.set_delay(self, delay)
         self.count_display.configure(text='Count #' + str(self.count))
         for count in range(1, self.num_counts + 1):
             try:
-                for item in self.walls[count]:
-                    item[0].search_walls(self.count, self.num_counts)
+                for loc in self.walls[count].keys():
+                    wall_count = 0
+                    i = self.count
+                    while i > 0:
+                        try:
+                            if self.walls[i][loc][0] == 'c':
+                                self.canvas.itemconfigure(self.walls[i][loc][2], state='normal')
+                                wall_count = i
+                                break
+                        except:
+                            pass
+                        i -= 1
+                        if i == 0:
+                            i = self.num_counts
+                        if i == self.count:
+                            break
+                    if wall_count != self.count and wall_count > 0:
+                        j = self.count
+                        while j > 0:
+                            try:
+                                if self.walls[j][loc][0] == 'r':
+                                    display.itemconfigure(self.walls[wall_count][loc][2], state='hidden')
+                                    break
+                            except:
+                                pass
+                            j -= 1
+                            if j == 0:
+                                j = self.num_counts
+                            if j == wall_count:
+                                break
             except:
                 pass
 
@@ -1419,183 +1580,304 @@ class Obstacle:
         for n in self.timing.keys():
             frames = self.timing[n]
             self.timing[n] = 42*(frames - 1)
-            
-    def to_json(self):
-        return {'num counts': self.num_counts, 'timing': self.timing}
-            
-def place_wall(event, ob, wall_menu, player, loc_dict):
-    n = loc_count.num
-    while n > 0:
-        loc = loc_dict[n]
-        if loc.highlighted:
-            name = wall_menu.get()
-            if name != '':
-                flag = False
-                m = ob.count
-                while m > 0:
-                    try:
-                        if loc.walls[m][2] == 'c':
-                            flag = True
-                            break
-                        if loc.walls[m][2] == 'r':
-                            if m == ob.count:
-                                flag = True
-                            break
-                    except:
-                        pass
-                    m -= 1
-                    if m == 0:
-                        m = ob.num_counts
-                    if m == ob.count:
-                        break
-                if not flag:
-                    ob.walls[ob.count] = ob.walls.get(ob.count, []) + [(loc, 'c')]
-                    wall = Wall(name, player.get())
-                    loc.edit_wall(wall, ob.count, 'c')
-            break
-        else:
-            n -= 1
-                
-def remove_wall(event, ob, loc_dict):
-    n = len(loc_dict)
-    wall = 0
-    while n > 0:
-        loc = loc_dict[n]
-        if loc.highlighted:
-            flag = False
-            if ob.count not in loc.walls.keys():
-                m = (ob.count - 1) % (ob.num_counts)
-                if m == 0:
-                    m = ob.num_counts
-                while m != ob.count:
-                    try:
-                        if loc.walls[m][2] == 'r':
-                            break
-                        if loc.walls[m][2] == 'c':
-                            wall = loc.walls[m][0]
-                            flag = True
-                            break
-                    except:
-                        pass
-                    m -= 1
-                    if m == 0:
-                        m = ob.num_counts
-            if flag:
-                ob.walls[ob.count] = ob.walls.get(ob.count, []) + [(loc, 'r')]
-                loc.edit_wall(wall, ob.count, 'r')
-                loc.search_walls(ob.count, ob.num_counts)
-            break
-        else:
-            n -= 1
-            
-def delete_wall(event, ob, loc_dict, canvas):
-    n = len(loc_dict)
-    while n > 0:
-        loc = loc_dict[n]
-        if loc.highlighted:
-            m = ob.count
-            while m > 0:
-                flag = False
-                try:
-                    if loc.walls[m][2] == 'c':
-                        flag = True
-                        break
-                    if loc.walls[m][2] == 'r':
-                        break
-                except:
-                    pass
-                m -= 1
-                if m == 0:
-                    m = ob.num_counts
-                if m == ob.count:
-                    break
-            if flag:
-                k = m
-                while k > 0:
-                    try:
-                        if loc.walls[k][2] == 'r':
-                            break
-                    except:
-                        pass
-                    k += 1
-                    if k == ob.num_counts + 1:
-                        k = 1
-                    if k == m:
-                        break
-                canvas.delete(loc.walls[m][1])
-                del loc.walls[m]
-                ob.walls[m].remove((loc, 'c'))
-                if k != m:
-                    del loc.walls[k]
-                    ob.walls[k].remove((loc, 'r'))
-                loc.search_walls(ob.count, ob.num_counts)
-            break
-        else:
-            n -= 1
-                
 
-def place_explosion(event, loc_dict, num_locs, ob):
-    n = num_locs.num
-    while n > 0:
-        loc = loc_dict[n]
-        if loc.highlighted:
-            for menu in explosion_menus:
+    def place_explosion(self, event, canvas, loc_dict, menus, player):
+        n = len(loc_dict)
+        while n > 0:
+            loc = loc_dict[n]
+            if loc.highlighted:
+                for menu in menus:
+                    name = menu.menu.get()
+                    if name != '':
+                        if name == 'Spider Mine':
+                            name = 'Vulture ' + name
+                        elif name != 'Infested Terran':
+                            name = menu.prefix + name
+                        explosion = Explosion(name, player.get(), menu.sprite)
+                        flag = False
+                        try:
+                            for item in self.explosions[self.count][loc]:
+                                if item[0].name == explosion.name:
+                                    flag = True
+                        except:
+                            pass
+                        if not flag:
+                            try:
+                                self.explosions[self.count] = self.explosions.get(self.count, {})
+                                self.explosions[self.count][loc] = self.explosions[self.count].get(loc, []) + [(explosion, canvas.create_image(loc.x + 16*loc.width, loc.y + 16*loc.height, anchor='center', tag='explosion', image=explosion.img))]
+                                self.canvas.organize_layers()
+                            except:
+                                pass
+                break
+            else:
+                n -= 1
+
+    #used for placing multiple explosions in a single frame using a single location
+    def place_explosion_recycle(self, canvas, menus, player, event):
+        if canvas.loc_in_recycle is not None:
+            loc = canvas.loc_in_recycle
+            x = canvas.snap(canvas.gridsize, loc.width, loc.height)[0]
+            y = canvas.snap(canvas.gridsize, loc.width, loc.height)[1]
+            for menu in menus:
                 name = menu.menu.get()
                 if name != '':
                     if name == 'Spider Mine':
                         name = 'Vulture ' + name
                     elif name != 'Infested Terran':
                         name = menu.prefix + name
-                    explosion = Explosion(name, selected_player.get(), menu.sprite)
+                    explosion = Explosion(name, player.get(), menu.sprite)
                     flag = False
                     try:
-                        for EXPLOSION in loc.explosions[ob.count]:
-                            if EXPLOSION[0].name == explosion.name:
+                        for item in self.recycle_explosions[self.count][loc][(x,y)]:
+                            if item[0].name == explosion.name:
                                 flag = True
                     except:
                         pass
                     if not flag:
-                        loc.place_explosion(explosion, ob.count)
-                        flag = False
                         try:
-                            if loc in ob.locs[ob.count]:
-                                flag = True
+                            self.recycle_explosions[self.count] = self.recycle_explosions.get(self.count, {})
+                            self.recycle_explosions[self.count][loc] = self.recycle_explosions[self.count].get(loc, {})
+                            self.recycle_explosions[self.count][loc][(x,y)] = self.recycle_explosions[self.count][loc].get((x,y), []) + [(explosion, canvas.create_image(x + 16*loc.width, y + 16*loc.height, anchor='center', tag='explosion', image=explosion.img))]
+                            self.canvas.organize_layers()
                         except:
                             pass
-                        if not flag:
-                            ob.locs[ob.count] = ob.locs.get(ob.count, []) + [loc]
-                        ob.timing[ob.count] = current_delay.get()
-            break
-        else:
-            n -= 1
+                        
+    def delete_explosion(self, event, loc_dict):
+        n = len(loc_dict)
+        while n > 0:
+            loc = loc_dict[n]
+            if loc.highlighted:
+                try:
+                    explosion = self.explosions[self.count][loc][-1]
+                    self.canvas.delete(explosion[1])
+                    self.explosions[self.count][loc].pop(-1)
+                    if len(self.explosions[self.count][loc]) == 0:
+                        del self.explosions[loc]
+                except:
+                    pass
+                break
+            else:
+                n -= 1
+    
+    def delete_explosion_recycle(self, canvas, event):
+        if canvas.loc_in_recycle is not None:
+            loc = canvas.loc_in_recycle
+            x = canvas.snap(canvas.gridsize, loc.width, loc.height)[0]
+            y = canvas.snap(canvas.gridsize, loc.width, loc.height)[1]
+            try:
+                explosions = self.recycle_explosions[self.count][loc][(x,y)]
+                canvas.delete(explosions[-1][1])
+                explosions.pop(-1)
+                if len(explosions) == 0:
+                    del self.recycle_explosions[self.count][loc][(x,y)]
+                if len(self.recycle_explosions[self.count][loc]) == 0:
+                    del self.recycle_explosions[self.count][loc]
+            except:
+               pass
+               
+    def place_wall(self, event, wall_menu, player, loc_dict):
+        n = len(loc_dict)
+        while n > 0:
+            loc = loc_dict[n]
+            if loc.highlighted:
+                name = wall_menu.get()
+                if name != '':
+                    flag = False
+                    m = self.count
+                    while m > 0:
+                        try:
+                            if self.walls[m][loc][0] == 'c':
+                                flag = True
+                                break
+                            if self.walls[m][loc][0] == 'r':
+                                if m == self.count:
+                                    flag = True
+                                break
+                        except:
+                            pass
+                        m -= 1
+                        if m == 0:
+                            m = self.num_counts
+                        if m == self.count:
+                            break
+                    if not flag:
+                        wall = Wall(name, player.get())
+                        self.walls[self.count] = self.walls.get(self.count, {})
+                        self.walls[self.count][loc] = ('c', wall, self.canvas.create_image(loc.x + 16*loc.width, loc.y + 16*loc.height, anchor='center', tag='wall', image=wall.img))
+                        self.canvas.organize_layers()
+                break
+            else:
+                n -= 1
+                
+    def remove_wall(self, event, loc_dict):
+        n = len(loc_dict)
+        wall = None
+        while n > 0:
+            loc = loc_dict[n]
+            if loc.highlighted:
+                flag = False
+                if self.count not in loc.walls.keys():
+                    m = (self.count - 1) % (self.num_counts)
+                    if m == 0:
+                        m = self.num_counts
+                    while m != self.count:
+                        try:
+                            if self.walls[m][loc][0] == 'r':
+                                break
+                            if self.walls[m][loc][0] == 'c':
+                                wall = self.walls[m][loc][1]
+                                flag = True
+                                break
+                        except:
+                            pass
+                        m -= 1
+                        if m == 0:
+                            m = self.num_counts
+                if flag:
+                    self.walls[self.count] = self.walls.get(self.count, {})
+                    self.walls[self.count][loc] = ('r', wall)
+                    self.show_count(self.timing[self.count])
+                break
+            else:
+                n -= 1
             
-def delete_explosion(event, loc_dict, num_locs, ob):
-    n = num_locs.num
+    def delete_wall(self, event, loc_dict):
+        wall = None
+        graphic = None
+        n = len(loc_dict)
+        while n > 0:
+            loc = loc_dict[n]
+            if loc.highlighted:
+                m = self.count
+                while m > 0:
+                    flag = False
+                    try:
+                        if self.walls[m][loc][0] == 'c':
+                            flag = True
+                            wall = self.walls[m][loc][1]
+                            graphic = self.walls[m][loc][2]
+                            break
+                        if self.walls[m][loc][0] == 'r':
+                            break
+                    except:
+                        pass
+                    m -= 1
+                    if m == 0:
+                        m = self.num_counts
+                    if m == self.count:
+                        break
+                if flag:
+                    k = m
+                    while k > 0:
+                        try:
+                            if self.walls[k][loc][0] == 'r':
+                                break
+                        except:
+                            pass
+                        k += 1
+                        if k == self.num_counts + 1:
+                            k = 1
+                        if k == m:
+                            break
+                    self.canvas.delete(self.walls[m][loc][2])
+                    del self.walls[m][loc]
+                    if k != m:
+                        del self.walls[k][loc]
+                    if len(self.walls[k]) == 0:
+                        del self.walls[k]
+                    self.show_count(self.timing[self.count])
+                break
+            else:
+                n -= 1
+
+    def to_json(self):
+        explosions = {}
+        for count in self.explosions.keys():
+            explosions[count] = explosions.get(count, {})
+            for loc in self.explosions[count].keys():
+                for item in self.explosions[count][loc]:
+                    explosion = item[0]
+                    explosions[count][loc.number] = explosions[count].get(loc.number, []) + [(explosion.name, explosion.player, explosion.sprite)]
+        recycle_explosions = {}
+        for count in self.recycle_explosions.keys():
+            recycle_explosions[count] = recycle_explosions.get(count, {})
+            for loc in self.recycle_explosions[count].keys():
+                recycle_explosions[count][loc.number] = recycle_explosions[count].get(loc.number, {})
+                for coord in self.recycle_explosions[count][loc].keys():
+                    for item in self.recycle_explosions[count][loc][coord]:
+                        explosion = item[0]
+                        recycle_explosions[count][loc.number][str(coord[0]) + '_' + str(coord[1])] = recycle_explosions[count][loc.number].get(coord, []) + [(explosion.name, explosion.player, explosion.sprite)]
+        walls = {}
+        for count in self.walls.keys():
+            walls[count] = walls.get(count, {})
+            for loc in self.walls[count].keys():
+                wall = self.walls[count][loc]
+                walls[count][loc.number] = (wall[0], wall[1].name, wall[1].player)
+        return {'num counts': self.num_counts, 'timing': self.timing, 'explosions': explosions, 'recycle_explosions': recycle_explosions, 'walls': walls}
+          
+class hotkey_btn(tk.Button, widget_hotkey):
+    def __init__(self, *args, window, hotkey, callback, **kwargs):
+        tk.Button.__init__(self, *args, **kwargs)
+        widget_hotkey.__init__(self, window, hotkey, callback)
+        
+class loc_ID_frame(Toplevel):
+    def __init__(self, *args, location, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.title=('Location ' + location.label)
+        self.frame = ttk.Frame(self)
+        self.frame.grid(row=0, column=0)
+        self.location = location
+        numbers = []
+        for i in range(1,256):
+            numbers.append(str(i))
+        self.label = ttk.Label(self.frame, text='Location ID:')
+        self.label.grid(row=0, column=0)
+        self.ID = StringVar()
+        self.menu = ttk.Entry(self.frame, textvariable=self.ID)
+        self.menu.grid(row=0, column=1)
+        self.button = ttk.Button(self.frame, text='Ok', command=lambda: self.set_ID())
+        self.button.grid(row=1,column=1)
+        
+    def set_ID(self):
+        try:
+            self.location.set_ID(int(self.ID.get()))
+            self.withdraw()
+        except:
+            pass
+
+loc_ID_windows = {}
+
+def set_loc_ID(event, main_window, loc_ID_dict, loc_dict):
+    n = loc_count.num
     while n > 0:
         loc = loc_dict[n]
         if loc.highlighted:
             try:
-                loc.delete_explosion(ob.count)
-                if ob.count not in loc.explosions.keys():
-                    ob.locs[ob.count].remove(loc)
+                loc_ID_dict[n].deiconify()
             except:
-                pass
+                window = loc_ID_frame(main_window, location=loc)
+                loc_ID_dict[n] = window
             break
         else:
             n -= 1
+           
 
 def hide_obstacle():
     display.itemconfigure('explosion', state='hidden')
     display.itemconfigure('wall', state='hidden')
     
 def show_obstacle(canvas, ob):
-    for loc in ob.locs[ob.count]:
-        for explosion in loc.explosions[ob.count]:
+    for loc in ob.explosions[ob.count].keys():
+        for explosion in ob.explosions[ob.count][loc]:
             canvas.itemconfigure(explosion[1], state='normal')
+    for loc in ob.recycle_explosions[ob.count].keys():
+        for coord in ob.recycle_explosions[ob.count][loc].keys():
+            for explosion in ob.recycle_explosions[ob.count][loc][coord]:
+                canvas.itemconfigure(explosion[1], state='normal')
             
 
 explosion_selection = ttk.LabelFrame(toolkit, text='Explosions:')
-explosion_selection.grid(row=0, column=1)
+explosion_selection.grid(row=0, column=2)
 
 selected_unit = {}
 image_index = 0
@@ -1697,9 +1979,51 @@ selected_player.trace('w', lambda *args, selected_player=selected_player: player
 player_number_menu.grid(row=0, column=1, padx=4)
 
 
+sound_controls = ttk.LabelFrame(toolkit, text='Sound:')
+sound_controls.grid(row=0,column=3, sticky='N')
+sound_menus_frame = ttk.LabelFrame(sound_controls, text='Units:')
+sound_menus_frame.grid(row=0,column=0, sticky='N')
+
+explosion1_m_sounds_label = ttk.Label(sound_menus_frame, text='Explosion1 (Medium)')
+explosion1_m_sounds_label.grid(row=0, column=0, sticky='W', pady=1)
+explosion1_m_sounds = acc(sound_menus_frame, completevalues = ['Protoss Archon', 'Protoss Carrier', 'Protoss Observer', 'Protoss Reaver'])
+explosion1_m_sounds.grid(row=0, column=1, pady=1)
+
+explosion1_s_sounds_label = ttk.Label(sound_menus_frame, text='Explosion1 (Small)')
+explosion1_s_sounds_label.grid(row=1, column=0, sticky='W', pady=1)
+explosion1_s_sounds = acc(sound_menus_frame, completevalues = ['Protoss Arbiter', 'Protoss Corsair', 'Protoss Probe', 'Protoss Scout', 'Protoss Shuttle'])
+explosion1_s_sounds.grid(row=1, column=1, pady=1)
+
+explosion2_m_sounds_label = ttk.Label(sound_menus_frame, text='Explosion2 (Medium)')
+explosion2_m_sounds_label.grid(row=2, column=0, sticky='W', pady=1)
+explosion2_m_sounds = acc(sound_menus_frame, completevalues = ['Terran Battlecruiser', 'Terran Science Vessel', 'Terran Siege Tank (Siege Mode)', 'Terran Siege Tank (Tank Mode)'])
+explosion2_m_sounds.grid(row=2, column=1, pady=1)
+
+explosion2_s_sounds_label = ttk.Label(sound_menus_frame, text='Explosion2 (Small)')
+explosion2_s_sounds_label.grid(row=3, column=0, sticky='W', pady=1)
+explosion2_s_sounds = acc(sound_menus_frame, completevalues = ['Terran Dropship', 'Terran Goliath', 'Terran SCV', 'Terran Valkyrie', 'Terran Vulture', 'Terran Wraith'])
+explosion2_s_sounds.grid(row=3, column=1, pady=1)
+
+zerg_air_death_explosion_large_sounds_label = ttk.Label(sound_menus_frame, text='Zerg Air Death Explosion (Large)')
+zerg_air_death_explosion_large_sounds_label.grid(row=4, column=0, sticky='W', pady=1)
+zerg_air_death_explosion_large_sounds = acc(sound_menus_frame, completevalues = ['Zerg Devourer', 'Zerg Guardian', 'Zerg Overlord'])
+zerg_air_death_explosion_large_sounds.grid(row=4, column=1, pady=1)
+
+zerg_air_death_explosion_small_sounds_label = ttk.Label(sound_menus_frame, text='Zerg Air Death Explosion (Small)')
+zerg_air_death_explosion_small_sounds_label.grid(row=5, column=0, sticky='W', pady=1)
+zerg_air_death_explosion_small_sounds = acc(sound_menus_frame, completevalues = ['Zerg Mutalisk', 'Zerg Scourge'])
+zerg_air_death_explosion_small_sounds.grid(row=5, column=1, pady=1)
+
+sound_menus_dict = {'Explosion1 (Medium)': explosion1_m_sounds,
+    'Explosion1 (Small)': explosion1_s_sounds,
+    'Explosion2 (Medium)': explosion2_m_sounds,
+    'Explosion2 (Small)': explosion2_s_sounds,
+    'Zerg Air Death Explosion (Large)': zerg_air_death_explosion_large_sounds,
+    'Zerg Air Death Explosion (Small)': zerg_air_death_explosion_small_sounds}
+
 
 obstacle_controls = ttk.Frame(toolkit, style='gray.TFrame')
-obstacle_controls.grid(row=0, column=2, sticky='N')
+obstacle_controls.grid(row=0, column=4, sticky='N')
 
 
 def change_timing_type():
@@ -1811,17 +2135,16 @@ class count_btn(hotkey_ttkBtn):
     def press(self, event=None):
         self.ob.hide_count()
         if self.hotkey == ']':
-            for num in self.loc_dict.keys():
-                loc = self.loc_dict[num]
-                loc.explosions = dict_shift(loc.explosions, self.ob.count, self.ob.num_counts, None)
-            self.ob.locs = dict_shift(self.ob.locs, self.ob.count, self.ob.num_counts, [])
-            self.ob.timing = dict_shift(self.ob.timing, self.ob.count, self.ob.num_counts, self.delay)
+            self.ob.explosions = dict_shift(self.ob.explosions, self.ob.count, self.ob.num_counts, {})
+            self.ob.recycle_explosions = dict_shift(self.ob.recycle_explosions, self.ob.count, self.ob.num_counts, {})
+            self.ob.timing = dict_shift(self.ob.timing, self.ob.count, self.ob.num_counts, int(self.delay.get()))
         if self.hotkey == '[':
-            self.ob.locs = dict_delete(self.ob.locs, self.ob.count, self.ob.num_counts)
-            self.ob.timing = dict_delete(self.ob.timing, self.ob.count, self.ob.num_counts)
-            for num in self.loc_dict.keys():
-                loc = self.loc_dict[num]
-                loc.explosions = dict_delete(loc.explosions, self.ob.count, self.ob.num_counts)
+            try:
+                self.ob.explosions = dict_delete(self.ob.explosions, self.ob.count, self.ob.num_counts)
+                self.ob.recycle_explosions = dict_delete(self.ob.recycle_explosions, self.ob.count, self.ob.num_counts)
+                self.ob.timing = dict_delete(self.ob.timing, self.ob.count, self.ob.num_counts)
+            except:
+                pass
         self.ob.count = self.next_count()
         flag = False
         if self.ob.count <= self.ob.num_counts:
@@ -1831,7 +2154,10 @@ class count_btn(hotkey_ttkBtn):
         elif self.hotkey == '[':
             self.ob.num_counts = max(1, self.ob.num_counts - 1)
         if flag:
-            self.ob.show_count(self.ob.timing[self.ob.count])
+            try:
+                self.ob.show_count(self.ob.timing[self.ob.count])
+            except:
+                pass
         else:
             self.ob.timing[self.ob.count] = self.delay.get()
             self.ob.show_count(self.delay.get())
@@ -1905,12 +2231,53 @@ play_btn.grid(row=2, column=2)
 delete_count_btn = count_btn(count_controls, win=root, key='[', cb=None, ob=OBSTACLE, delay=timing_controls.delay.get(),loc_dict=locations_numerical, tooltip_text='Delete Count ([)', text='Delete', width=6)
 delete_count_btn.cmd(delete_count_btn.press)
 delete_count_btn.grid(row=2, column=3, columnspan = 2)
+
+########## MOVING LOCATIONS ################
+
+def bind_loc_recycling(OS, tool, ob, canvas, loc_dict, menus, player):
+    global loc_count
+    if canvas.loc_recycling.get():
+        canvas.bind('<Key-c>', lambda event: canvas.recycle_loc(data_number(2.5), ob, loc_dict, canvas.gridsize, event))
+        canvas.bind('<Button-1>', lambda event: ob.place_explosion_recycle(canvas, menus, player, event))
+        if OS == 'Darwin':
+            right_mouse = '2'
+        else:
+            right_mouse = '3'
+        canvas.bind('<Button-' + right_mouse + '>', lambda event: ob.delete_explosion_recycle(canvas, event))
+    else:
+        canvas.unbind('<Key-c>')
+        canvas.delete('highlight')
+        canvas.bind('<Motion>', lambda event: canvas.mouse_highlight(tool, canvas.gridsize, 2, 2, loc_dict, event))
+        canvas.bind('<Button-1>', lambda event: ob.place_explosion(event, canvas, loc_dict, menus, player))
+
+display.loc_recycling.trace('w', lambda *args, display=display: bind_loc_recycling(operating_system, selected_tool, OBSTACLE, display, locations_numerical, explosion_menus, selected_player))
+
+def resize_grid_loc(canvas, d):
+    gridsize_changed.set(str(d))
+    canvas.resize_grid(d)
+    
+location_moving_controls = ttk.LabelFrame(toolkit, text='Location Moving:')
+location_moving_controls.grid(row=0, column=0, sticky='N')
+
+grid_resize_frame_loc = ttk.LabelFrame(location_moving_controls, text='Grid size (px):')
+grid_resize_frame_loc.grid(row=0, column=0)
+gridsize_changed_loc = StringVar()
+gridsize_changed_loc.set('32')
+gridsize_changed_loc.trace('w', lambda *args, gridsize_changed_loc=gridsize_changed_loc: resize_grid_loc(display, int(gridsize_changed_loc.get())))
+grid_resize_menu_loc = ttk.OptionMenu(grid_resize_frame_loc, gridsize_changed_loc, '32', '32', '16', '8')
+grid_resize_menu_loc.grid(row=0, column=0, sticky='N')
+
+recycle_loc_btn = ttk.Checkbutton(location_moving_controls, text='Location recycling', takefocus=False, variable=display.loc_recycling)
+recycle_loc_btn.grid(row=1, column=0, sticky='W')
+
 ###################################################################################################################################################################################################################################################
 
 Obstacle_UI = []
 Obstacle_UI.append(explosion_selection)
 Obstacle_UI.append(obstacle_controls)
 Obstacle_UI.append(wall_controls)
+Obstacle_UI.append(sound_controls)
+Obstacle_UI.append(location_moving_controls)
 for widget in Obstacle_UI:
     widget.grid_remove()
     
@@ -2032,51 +2399,119 @@ death_type_kill.grid(row=0, column=0, sticky='W')
 death_type_remove = Radiobutton_save(death_options, text='Remove Unit', takefocus=False, value='remove', variable=death_type, tracevar=death_type, settings='settings.txt', option='death_type')
 death_type_remove.grid(row=1, column=0, sticky='W')
 
-
+use_sound = IntVar()
+use_sound.set(1)
+use_sound_button = ttk.Checkbutton(misc_options, text='Add Sprite Audio', variable=use_sound, onvalue=1, offvalue=0)
+use_sound_button.grid(row=2,column=0, sticky='W')
 
 
 
 ob_number.trace('w', lambda *args, ob_number=ob_number: change_ob_number(ob_number, generate_btn))
 
-def generate_triggers(text_display, obstacle, ob_number, trigger_player, force_name, DC, death, comment_config, timing):
+def generate_triggers(text_display, obstacle, ob_number, loc_dict, trigger_player, force_name, DC, death, comment_config, timing, sound_dict, sound_flag):
     triggers = ''
     for n in range(1, obstacle.num_counts + 1):
         units = []
         sprites = []
+        recycle_locations = []
+        recycle_explosions = {}
         walls = []
-        try:
-            for loc in obstacle.locs[n]:
-                for explosion in loc.explosions[n]:
+        locations = []
+        
+        for l in range(1, len(loc_dict) + 1):
+            loc = loc_dict[l]
+            try:
+                for explosion in obstacle.explosions[n][loc]:
+                    locations.append(loc.label)
                     if explosion[0].sprite:
                         sprites.append((loc.label, explosion[0].name, explosion[0].player))
                     else:
                         units.append((loc.label, explosion[0].name, explosion[0].player))
-        except:
-            pass
-        try:
-            for wall in obstacle.walls[n]:
-                name = wall[0].walls[n][0].name
-                player = wall[0].walls[n][0].player
-                loc = wall[0].label
-                walls.append((name, loc, player, wall[1]))
-        except:
-            pass
+            except:
+                pass
+                
+            try:
+                recycle_locations.append(loc.label)
+                recycle_explosions[loc.label] = {}
+                recycle_explosions[loc.label]['ID'] = loc.ID
+                recycle_explosions[loc.label]['start'] = (loc.x, loc.y)
+                recycle_explosions[loc.label]['explosions'] = []
+                for coord in sorted(obstacle.recycle_explosions[n][loc].keys(), key=lambda k: [k[1], k[0]]):
+                    explosion = obstacle.recycle_explosions[n][loc][coord][0]
+                    recycle_explosions[loc.label]['explosions'].append(((coord[0], coord[1]), (explosion[0].name, explosion[0].player, explosion[0].sprite)))
+            except:
+                pass
+        
+            try:
+                wall = obstacle.walls[n][loc]
+                name = wall[1].name
+                player = wall[1].player
+                walls.append((name, loc.label, player, wall[0]))
+            except:
+                pass
         d = obstacle.timing[n]
-        count = obgen.count_triggers(ob_num=ob_number, count_num=n, last_count=(n == obstacle.num_counts), trig_owner=trigger_player, force=force_name, death_counters=DC, death_type=death, comment_options=comment_config, timing_type=timing, unit_explosions=units, sprite_explosions=sprites, wall_actions=walls, delay=d)
+        sounds = []
+        if sound_flag == 1:
+            sound_count = n + 1
+            if sound_count > obstacle.num_counts:
+                sound_count = 1
+            try:
+                for loc in obstacle.explosions[sound_count].keys():
+                    for explosion in obstacle.explosions[sound_count][loc]:
+                        if explosion[0].sprite:
+                            try:
+                                sounds.append(sound_dict[explosion[0].name].get())
+                            except:
+                                pass
+            except:
+                pass
+            try:
+                for loc in obstacle.recycle_explosions[sound_count].keys():
+                    for coord in obstacle.recycle_explosions[sound_count][loc].keys():
+                        for explosion in obstacle.recycle_explosions[sound_count][loc][coord]:
+                            if explosion[0].sprite:
+                                try:
+                                    sounds.append(sound_dict[explosion[0].name].get())
+                                except:
+                                    pass
+            except:
+                pass
+        count = obgen.count_triggers(ob_num=ob_number,
+            count_num=n,
+            last_count=(n == obstacle.num_counts),
+            locations_used = locations,
+            recycle_locations_list = recycle_locations,
+            recycle_explosions_list = recycle_explosions,
+            trig_owner=trigger_player,
+            force=force_name,
+            death_counters=DC,
+            death_type=death,
+            comment_options=comment_config,
+            timing_type=timing,
+            unit_explosions=units,
+            sprite_explosions=sprites,
+            use_sound_flag = sound_flag,
+            sound_effects=set(sounds),
+            wall_actions=walls,
+            delay=d)
         for trigger in count:
             triggers += trigger
     text_display.delete(1.0, END)
     text_display.insert(1.0, triggers)
 
-generate_btn = ttk.Button(trig_controls, text='Generate triggers', takefocus=False, command=lambda: generate_triggers(trig_text_display, 
+generate_btn = ttk.Button(trig_controls, text='Generate triggers', takefocus=False,
+    command=lambda: generate_triggers(trig_text_display, 
     OBSTACLE,
     int(ob_number.get()),
+    locations_numerical,
     trigger_owner_player.get(),
     player_force.get(),
     [ob_DC.get(), count_DC.get(), frame_DC.get(), DC_units_player.get()],
     death_type.get(),
     [comment_ob.get(), comment_count.get(), comment_part.get()],
-    timing_controls.mode))
+    timing_controls.mode,
+    sound_menus_dict,
+    use_sound.get()))
     
 generate_btn.grid(row=0, column=4, ipady=10, sticky='N')
 
