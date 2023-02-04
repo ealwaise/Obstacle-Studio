@@ -25,7 +25,8 @@ def default(obj):
     if hasattr(obj, 'to_json'):
         return obj.to_json()
     raise TypeError(f'Object of type {obj.__class__.__name__} is not JSON serializable')
-    
+   
+#erases all terrain/obstacle/location data and starts a new save file
 def new_file(main_window, canvas, terrain_dict, loc_dict, num_locs, ob, current_file, event):
     canvas.clear()
     ob.count = 1
@@ -40,6 +41,7 @@ def new_file(main_window, canvas, terrain_dict, loc_dict, num_locs, ob, current_
     num_locs.replace(0)
     current_file.set('')
     
+#opens a saved obstacle file
 def open_file(main_window, canvas, terrain_dict, tile_dict, loc_dict, num_locs, ob, ob_num, tool, event):
     file = filedialog.askopenfile(mode='r', initialdir = './', title = 'File name:', filetypes = [('JavaScript Object Notation file', '*.json')], defaultextension='.json')
     if file is not None:
@@ -50,6 +52,7 @@ def open_file(main_window, canvas, terrain_dict, tile_dict, loc_dict, num_locs, 
         ob.timing.clear()
         ob.count = 1
         
+        #recreates the saved terrain
         terrain_dict.clear()
         JSON_terrain_dict = json.loads(JSON_dict['terrain'])
         for coords in JSON_terrain_dict.keys():
@@ -57,7 +60,8 @@ def open_file(main_window, canvas, terrain_dict, tile_dict, loc_dict, num_locs, 
             y = int(coords.split()[1])
             index = int(JSON_terrain_dict[coords])
             terrain_dict[coords] = terrain_tile(x, y, canvas, index, tile_dict)
-            
+        
+        #recreates the saved locations
         loc_dict.clear()
         JSON_loc_dict = json.loads(JSON_dict['locations'])
         for n in JSON_loc_dict.keys():
@@ -77,6 +81,7 @@ def open_file(main_window, canvas, terrain_dict, tile_dict, loc_dict, num_locs, 
         for n in range(1, len(loc_dict) + 1):
             loc_dict[n].write_name(len(loc_dict))
         
+        #recreates the saved obstacle
         JSON_ob_dict = json.loads(JSON_dict['obstacle'])
         ob.num_counts = int(JSON_ob_dict['num counts'])
         timing = JSON_ob_dict['timing']
@@ -149,7 +154,8 @@ def open_file(main_window, canvas, terrain_dict, tile_dict, loc_dict, num_locs, 
         
 current_save_file = StringVar()
 current_save_file.set('')
-        
+
+#serializes the current terrain/location/obstacle data as a JSON file
 def save(main_window, canvas, terrain_dict, loc_dic, num_locs, ob, ob_num, current_file, event):
     if current_file.get() == '':
         save_as(main_window, canvas, terrain_dict, loc_dic, num_locs, ob, ob_num, current_file, None)
@@ -330,7 +336,7 @@ class Radiobutton_save(ttk.Radiobutton, save_settings):
         tracevar.set(self.load())
 #///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#the following classes
+#the following classes are used to specialized buttons with hotkeys or groups of buttons arranged in a grid
 #/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class indexed_btn(tk.Button):
     def __init__(self, *args, index_data_num, index, default_color, mouse_color, **kwargs):
@@ -388,6 +394,7 @@ darkgraystyle.configure('darkgray.TFrame', background = '#484c4f')
 buttonStyle = ttk.Style()
 buttonStyle.map('Highlight.TButton')
 
+#a subclass of the tkinter canvas class. this is used to display all the images relevant to obstacle creation(the grid, mouseover highlights, terrain, locations, and explosions)
 class ob_canvas(tk.Canvas):
     def __init__(self, blank, *args, **kwargs):
         tk.Canvas.__init__(self, *args, **kwargs)
@@ -405,6 +412,7 @@ class ob_canvas(tk.Canvas):
                 highlight_tile_resized = highlight_tile.resize((32*width,32*height), Image.ANTIALIAS)
                 self.highlight_resizes[(width, height)] = ImageTk.PhotoImage(highlight_tile_resized)
         
+    #creates the various image layers used in obstacle creation and orders them
     def create_layers(self, layers):
         for layer in layers:
             if len(self.find_withtag(layer)) == 0:
@@ -425,11 +433,13 @@ class ob_canvas(tk.Canvas):
         self.tag_lower('location', 'wall')
         self.tag_lower('terrain', 'location')
 
+    #deletes all images on the canvas
     def clear(self):
         for layer in ('terrain', 'location', 'wall', 'explosion', 'highlight', 'locationMouseover', 'locationExtras'):
             self.delete(layer)
         self.create_layers(self.layers)
         
+    #changes the visibility of different groups of items depending on the editor mode the user is in
     def load(self, tool):
         for layer in ('terrain', 'location', 'wall', 'explosion', 'highlight', 'locationMouseover', 'locationExtras'):
             self.itemconfig(layer, state='hidden')
@@ -439,10 +449,12 @@ class ob_canvas(tk.Canvas):
             self.itemconfig('location', state='normal')
             self.itemconfig('locationExtras', state='normal')
             
+    #renames all the locations. used when a location is deleted or the location nomenclature system is changed
     def rename_locations(self, num_locs, loc_dict):
         for i in range(1, num_locs.num + 1):
             loc_dict[i].write_name(num_locs)
             
+    #snaps the mouse cursor to the grid
     def snap(self, d, width, height):
         def rounding(p, parity):
             q = round(p/d)*d
@@ -456,6 +468,7 @@ class ob_canvas(tk.Canvas):
         y = rounding(self.winfo_pointery() - self.winfo_rooty(), height % 2)
         return (x - 16*width, y - 16*height)
         
+    #draws a grid on the canvas with square cells of length d pixels
     def draw_grid(self, d):
         self.delete('grid')
         width = self.winfo_width()
@@ -471,10 +484,12 @@ class ob_canvas(tk.Canvas):
             
         self.organize_layers()
     
+    #redraws the grid (for when the user wants to change the grid size)
     def resize_grid(self, d):
         #self.draw_grid(d)
         self.gridsize = d
         
+    #highlights a location in green that the user is mousing over. if multiple locations intersect the cursor position, the most recently created location will be highlighted.
     def highlight_location(self, tool, loc_dict):
         num = -1
         for n in range(1, len(loc_dict) + 1):
@@ -508,7 +523,8 @@ class ob_canvas(tk.Canvas):
                     break
             if not flag:
                 self.config(cursor='arrow')
-            
+    
+    #highlights the grid cell the user is mousing over
     def mouse_highlight(self, tool, d, w, h, loc_dict, event):
         if tool.num < 3:
             self.delete('highlight')
@@ -518,6 +534,7 @@ class ob_canvas(tk.Canvas):
         if tool.num > 1:
             self.highlight_location(tool, loc_dict)
         
+
     def recycle_loc(self, tool, ob, loc_dict, gridsize, event):
         if self.loc_recycling:
             n = len(loc_dict)
@@ -804,6 +821,7 @@ tilebuttons[13].configure(command=lambda: select_tile(13, selected_tile, tilebut
 tilebuttons[14].configure(command=lambda: select_tile(14, selected_tile, tilebuttons))
 tilebuttons[15].configure(command=lambda: select_tile(15, selected_tile, tilebuttons))
 
+#container widget holding all the terrain tile size buttons
 class fixed_sizes(Frame):
     def __init__(self, *args, window, d, w, h, tool, **kwargs):
         super().__init__(*args, **kwargs)
@@ -836,6 +854,7 @@ class fixed_sizes(Frame):
         btn.grid(row=r, column=c, sticky='N')
         self.buttons.append(btn)
 
+#contianer widget for the entry boxes allowing the user to use custom terrain tile sizes
 class custom_dim(ttk.Entry):
     def __init__(self, *args, max_size, w_data_num, h_data_num, w, h, **kwargs):
         super().__init__(*args, **kwargs)
@@ -858,7 +877,8 @@ class custom_dim(ttk.Entry):
                     self.h.set(20)
         except:
             pass
-            
+
+#enable/disable custom terrain tile sizing
 def enable_custom_size(enabled, w_btn, h_btn, fixed_btns):
     if enabled:
         highlight_button(None, fixed_btns.buttons, 'white', '#dfdfdf')
@@ -924,6 +944,7 @@ delete_terrain_btn = hotkey_ttkBtn(toolkit, window=root, hotkey='<Control-KeyPre
 delete_terrain_tip = tooltip(root, delete_terrain_btn, '(Ctrl+BackSpace)', (20, 10))
 delete_terrain_btn.grid(row=1, column=0)
 
+#wrapper class for terrain tile images on the canvas
 class terrain_tile:
     def __init__(self, x, y, canvas, index, imgs):
         self.img = canvas.create_image(x, y, anchor='nw', tag='terrain', image=imgs[index])
@@ -959,6 +980,7 @@ def delete_all_terrain(canvas, tileMap, event=None):
         canvas.delete(tileMap[tile].img)
         del tileMap[tile]
 
+#deletes terrain tiles by mousing over them while holding/clicking the right mouse button
 def delete_terrain(canvas, w, h, event):
     width = w.num
     height = h.num
@@ -1087,6 +1109,7 @@ class Location:
         
         self.ID = 0
         
+    #draws the green borders of the location on the canvas
     def draw_borders(self):
         for border in self.borders:
             display.delete(border)
@@ -1095,6 +1118,7 @@ class Location:
         self.borders.append(display.create_line((self.x, self.y + 32*self.height), (self.x + 32*self.width, self.y + 32*self.height), tag='locationExtras', fill='#20ff26'))
         self.borders.append(display.create_line((self.x, self.y), (self.x, self.y + 32*self.height), tag='locationExtras', fill='#20ff26'))
         
+    #writes the name of the location in the top-left corner according to the chosen location nomenclature
     def write_name(self, num_locs):
         try:
             display.delete(self.name)
@@ -1115,7 +1139,8 @@ class Location:
         prefix = location_prefix.get()
         self.label = prefix[0:min(4,len(prefix))] + numbering
         self.name = display.create_text(self.x + 2, self.y + 2, anchor = 'nw', font = 'Arial 10', text=self.label, tag='locationExtras', fill='white')
-        
+    
+    #detects if a location is being moused over
     def mouseover(self):
         x = display.winfo_pointerx() - display.winfo_rootx()
         y = display.winfo_pointery() - display.winfo_rooty()
@@ -1138,7 +1163,8 @@ class Location:
             else:
                 bounds_y = 1
         return (bounds_x, bounds_y)
-            
+    
+    #highlights the location if its being moused over
     def mouseover_highlight(self):
         if not self.highlighted:
             self.highlighted = True
@@ -1148,7 +1174,8 @@ class Location:
                 pass
             self.mouseover_overlay = display.create_image(self.x, self.y, anchor='nw', tag='locationMouseover', image=location_mouseover_overlays[(self.width,self.height)])
             display.organize_layers()
-            
+    
+    #gets rid of the highlight image if the location is currently being moused over
     def unmouseover(self):
         if self.highlighted:
             self.highlighted = False
@@ -1158,7 +1185,8 @@ class Location:
                 pass
             self.overlay = display.create_image(self.x, self.y, anchor='nw', tag='location', image=location_overlays[(self.width,self.height)])
             display.organize_layers()
-            
+    
+    #deletes the location and all associated obstacle data and renumbers the remaining locations accordingly
     def delete(self, loc_dict, num_locs):
         display.delete(self.name)
         try:
@@ -1184,7 +1212,8 @@ class Location:
             loc.write_name(num_locs)
             loc_dict[loc.number] = loc
         num_locs.add(-1)
-            
+    
+    #allows the user to move locations by press and holding the left mouse button and dragging
     def move(self, d):
         if (self.mouseover()[0] == 1 and self.mouseover()[1] == 1 and not self.motion and self.resizing == [False, False]) or self.motion:
             x = snap(d, self.width, self.height)[0]
@@ -1237,13 +1266,16 @@ class Location:
         self.draw_borders()
         recreate_layer('highlight')
         display.organize_layers()
-                    
+    
+    #sets the location's ID. needed for location moving EUD triggers
     def set_ID(self, ID):
         self.ID = ID
-                    
+    
+    #serializes a location object to JSON
     def to_json(self):
         return {'number': self.number, 'x': self.x, 'y': self.y, 'width': self.width, 'height': self.height, 'ID': self.ID}
-            
+
+#event binding for location moving
 def move_location(d, w, h, loc_dictionary, event):
     highlight_atCursor(d, w, h, 2, event=None)
     n = loc_count.num
@@ -1444,13 +1476,14 @@ wall_player_menu = acc_save(wall_player_frame, completevalues=players, textvaria
 selected_wall_player.trace('w', lambda *args, selected_wall_player=selected_wall_player: wall_player_menu.save())
 wall_player_menu.grid(row=0, column=0)
 
-
+#wrapper class for the wall images on the canvas, plus associated data
 class Wall:
     def __init__(self, name, player):
         self.name = name
         self.img = wall_images[self.name]
         self.player = player
 
+#wrapper class for the explosion images on the canvas, plus associated data
 class Explosion:
     def __init__(self, name, player, sprite):
         self.name = name
@@ -1460,7 +1493,8 @@ class Explosion:
         
     def to_json(self):
         return {'name': self.name, 'player': self.player, 'sprite': self.sprite}
-        
+
+#class containing all the data for the obstacle currently being made (a sequence of counts with explosions/walls on locations)
 class Obstacle:
     def __init__(self, canvas, count_display, timing_UI):
         self.count = 1
@@ -1474,6 +1508,7 @@ class Obstacle:
         self.count_display = count_display
         self.timing_UI = timing_UI
 
+    #hides the explosion/wall images associated with the current count. used when the count currently being viewed changes
     def hide_count(self):
         try:
             for loc in self.explosions[self.count].keys():
@@ -1519,7 +1554,8 @@ class Obstacle:
                     j = self.num_counts
                 if j == wall_count:
                     break
-        
+                    
+    #shows the explosion/wall images associated with the current count. used when the count currently being viewed changes
     def show_count(self, delay):
         try:
             for loc in self.explosions[self.count].keys():
@@ -1580,7 +1616,8 @@ class Obstacle:
         for n in self.timing.keys():
             frames = self.timing[n]
             self.timing[n] = 42*(frames - 1)
-
+            
+    #places an explosion at a given location during the current count
     def place_explosion(self, event, canvas, loc_dict, menus, player):
         n = len(loc_dict)
         while n > 0:
@@ -1641,7 +1678,8 @@ class Obstacle:
                             self.canvas.organize_layers()
                         except:
                             pass
-                        
+    
+    #deletes an explosion at a given location during the current count
     def delete_explosion(self, event, loc_dict):
         n = len(loc_dict)
         while n > 0:
@@ -1659,6 +1697,7 @@ class Obstacle:
             else:
                 n -= 1
     
+    #deltes an explosion created using the location recycling feature
     def delete_explosion_recycle(self, canvas, event):
         if canvas.loc_in_recycle is not None:
             loc = canvas.loc_in_recycle
@@ -1674,7 +1713,8 @@ class Obstacle:
                     del self.recycle_explosions[self.count][loc]
             except:
                pass
-               
+    
+    #places a wall at at a given location during the current count    
     def place_wall(self, event, wall_menu, player, loc_dict):
         n = len(loc_dict)
         while n > 0:
@@ -1709,6 +1749,7 @@ class Obstacle:
             else:
                 n -= 1
                 
+    #removes a wall at at a given location
     def remove_wall(self, event, loc_dict):
         n = len(loc_dict)
         wall = None
@@ -1740,7 +1781,8 @@ class Obstacle:
                 break
             else:
                 n -= 1
-            
+    
+    #deletes a wall at at a given location during the current count  
     def delete_wall(self, event, loc_dict):
         wall = None
         graphic = None
@@ -1789,7 +1831,8 @@ class Obstacle:
                 break
             else:
                 n -= 1
-
+                
+    #serializes an obstacle object to JSON
     def to_json(self):
         explosions = {}
         for count in self.explosions.keys():
@@ -1819,7 +1862,8 @@ class hotkey_btn(tk.Button, widget_hotkey):
     def __init__(self, *args, window, hotkey, callback, **kwargs):
         tk.Button.__init__(self, *args, **kwargs)
         widget_hotkey.__init__(self, window, hotkey, callback)
-        
+
+#container widget for setting location IDs
 class loc_ID_frame(Toplevel):
     def __init__(self, *args, location, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1882,7 +1926,7 @@ explosion_selection.grid(row=0, column=2)
 selected_unit = {}
 image_index = 0
 
-
+#menu from which one can select various kinds of explosions to place in obstacles
 class explosion_menu(ttk.Frame):
     def choose():
         global selected_unit
@@ -2025,7 +2069,7 @@ sound_menus_dict = {'Explosion1 (Medium)': explosion1_m_sounds,
 obstacle_controls = ttk.Frame(toolkit, style='gray.TFrame')
 obstacle_controls.grid(row=0, column=4, sticky='N')
 
-
+#changes the timing time from waits to frames or vice versa
 def change_timing_type():
     global timing_type, timing_type_btn, timing_entry_label, OBSTACLE
     flag = False
@@ -2044,7 +2088,8 @@ def change_timing_type():
         OBSTACLE.waits_to_frames()
         frames = int(int(current_delay.get())/42) + 1
         current_delay.set(str(frames))
-            
+
+#container widget for the UI objects that control adding/removing or browsing through counts of an obstacle and setting the delay between counts
 class ob_timing_UI(LabelFrame):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -2408,6 +2453,7 @@ use_sound_button.grid(row=2,column=0, sticky='W')
 
 ob_number.trace('w', lambda *args, ob_number=ob_number: change_ob_number(ob_number, generate_btn))
 
+#generates all the triggers needed to create the obstacle that the user has designed and prints the triggers to the text display
 def generate_triggers(text_display, obstacle, ob_number, loc_dict, trigger_player, force_name, DC, death, comment_config, timing, sound_dict, sound_flag):
     triggers = ''
     for n in range(1, obstacle.num_counts + 1):

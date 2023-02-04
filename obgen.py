@@ -72,6 +72,7 @@ image_indices = {
     'Maelstrom Hit': 998,
 }
 
+#####################################################################functions for creating strings which correspond to various types of Starcraft trigger actions
 def deaths(player, unit, relation, number):
     return 'Deaths(\"' + player + '\", \"' + unit + '\", ' + relation + ', ' + str(number) + ');'
 
@@ -155,7 +156,9 @@ def add_comment(ob_num, count_num, part_num, multipart, options):
     comment += '\");\n'
     
     return comment
+#################################################################################################################
 
+#returns a list of triggers which realize the obstacle represented by the data passed in
 def count_triggers(ob_num=1, count_num=1, last_count=False, locations_used=[], recycle_locations_list=[], recycle_explosions_list={}, trig_owner='', force='', death_counters = [], death_type='', comment_options=[], timing_type='', unit_explosions=[], sprite_explosions = [], use_sound_flag = 1, sound_effects = [], wall_actions=[], delay=1):
     triggers = []
     conditions = []
@@ -172,6 +175,7 @@ def count_triggers(ob_num=1, count_num=1, last_count=False, locations_used=[], r
         for unit in sound_effects:
             actions.append(set_deaths(force, unit, 'Set to', 1))
     
+    #deals with walls created in the obstacle
     for wall in wall_actions:
         if wall[3] == 'c':
             actions.append(create_unit_prop(wall[2], wall[0], 1, wall[1], 2))
@@ -189,15 +193,17 @@ def count_triggers(ob_num=1, count_num=1, last_count=False, locations_used=[], r
         sprite_flag = True
         
     for explosion in sorted(unit_explosions, key=lambda k: k[1]):
-        actions.append(create_unit(explosion[2], explosion[1], 1, explosion[0]))
+        actions.append(create_unit(explosion[2], explosion[1], 1, explosion[0])) #action for making regular explosions (created without location moving)
         units_used[explosion[1]] = units_used.get(explosion[1], []) + [explosion[2]]
-        
+    
+    #generates the kill/remove actions for regular explosions (created without location moving)
     for loc in locations_used:
         if death_type == 'kill':
             actions.append(kill_unit_at_location('All players', 'Men', 'All', loc))
         if death_type == 'remove':
             actions.append(remove_unit_at_location('All players', 'Zerg Zergling', 'All', loc))
         
+    #deals with the explosions created using a single location moved via EUDs in a single frame
     for loc in recycle_locations_list:
         ID = recycle_explosions_list[loc]['ID']
         coord = recycle_explosions_list[loc]['start']
@@ -252,6 +258,7 @@ def count_triggers(ob_num=1, count_num=1, last_count=False, locations_used=[], r
         trigger_start += condition + '\n'
     trigger_start += '\n' + 'Actions:\n'
     
+    #splits the generated actions into a sequence of triggers
     num_actions = len(actions)
     part_num = 1
     triggers = []
